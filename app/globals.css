@@ -1,26 +1,97 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #050505;
+  --panel: #080808;
+  --text: #e5e5e5;
+  --muted: #8a8a8a;
+  --dim: #555555;
+  --accent: #39ff88;
+  --amber: #ffb020;
+  --red: #ff4d4d;
+  --border: #242424;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+* {
+  box-sizing: border-box;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  background: var(--background);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  margin: 0;
+  min-height: 100vh;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.018) 50%, rgba(0, 0, 0, 0.08) 50%),
+    radial-gradient(circle at top left, rgba(57, 255, 136, 0.08), transparent 28%),
+    var(--background);
+  background-size:
+    100% 4px,
+    100% 100%,
+    100% 100%;
+  color: var(--text);
+  font-family:
+    "JetBrains Mono",
+    "IBM Plex Mono",
+    "Geist Mono",
+    "Courier New",
+    monospace;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(57, 255, 136, 0.25);
+  color: var(--text);
+}
+
+.terminal-window {
+  border: 1px solid var(--border);
+  background: rgba(8, 8, 8, 0.94);
+  box-shadow:
+    0 0 0 1px rgba(57, 255, 136, 0.04),
+    0 0 60px rgba(57, 255, 136, 0.05);
+}
+
+.terminal-titlebar {
+  border-bottom: 1px solid var(--border);
+  background: #0d0d0d;
+}
+
+.terminal-green {
+  color: var(--accent);
+  text-shadow: 0 0 10px rgba(57, 255, 136, 0.28);
+}
+
+.terminal-muted {
+  color: var(--muted);
+}
+
+.terminal-dim {
+  color: var(--dim);
+}
+
+.terminal-line {
+  border-bottom: 1px dashed rgba(229, 229, 229, 0.1);
+}
+
+.terminal-cursor::after {
+  content: "█";
+  display: inline-block;
+  margin-left: 6px;
+  color: var(--accent);
+  animation: blink 1s steps(1) infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
 }
