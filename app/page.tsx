@@ -368,18 +368,7 @@ export default async function Home() {
       reflection.reflection_type === "shadow"
   );
 
-  const todayCompletedProtocolIds = new Set(
-    (logs ?? [])
-      .filter((log) => log.completed)
-      .map((log) => log.habit_id)
-  );
-
   const totalProtocols = habits?.length ?? 0;
-
-  const completedProtocols =
-    habits?.filter((habit) =>
-      todayCompletedProtocolIds.has(habit.id)
-    ).length ?? 0;
 
   const todayReset =
     (resetScores ?? []).find(
@@ -426,7 +415,6 @@ export default async function Home() {
               habits={habits ?? []}
               logs={logs ?? []}
               totalProtocols={totalProtocols}
-              completedProtocols={completedProtocols}
               initialHasResetRecord={Boolean(todayReset)}
               initialIsLocked={Boolean(
                 todayReset?.is_locked
@@ -437,9 +425,8 @@ export default async function Home() {
               timeZone={
                 initialSettings.timezone
               }
-            />
-
-            <div className="px-2 pb-6 sm:px-4 sm:pb-4 md:px-6 md:pb-6">
+            >
+              <div>
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 <ModuleAccordion
                   id="body-data"
@@ -822,6 +809,7 @@ export default async function Home() {
                 </ModuleAccordion>
               </div>
             </div>
+            </ResetDashboard>
           </div>
         </div>
       </section>

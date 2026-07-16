@@ -40,11 +40,11 @@ type ResetDashboardProps = {
   habits: Habit[];
   logs: HabitLog[];
   totalProtocols: number;
-  completedProtocols: number;
   initialHasResetRecord: boolean;
   initialIsLocked: boolean;
   initialLockedAt: string | null;
   timeZone: string;
+  children?: React.ReactNode;
 };
 
 const routineLabels: Record<RoutineType, string> = {
@@ -66,11 +66,11 @@ export function ResetDashboard({
   habits,
   logs,
   totalProtocols,
-  completedProtocols,
   initialHasResetRecord,
   initialIsLocked,
   initialLockedAt,
   timeZone,
+  children,
 }: ResetDashboardProps) {
   const supabase = createClient();
   const [isPending, startTransition] =
@@ -125,6 +125,14 @@ export function ResetDashboard({
     );
   }, [sortedHabits]);
 
+  const completedProtocolCount = useMemo(
+    () =>
+      habits.filter(
+        (habit) => completedMap[habit.id]
+      ).length,
+    [completedMap, habits]
+  );
+
   const progress = useMemo(() => {
     function calculateRoutine(type: RoutineType) {
       const list = grouped[type];
@@ -163,22 +171,6 @@ export function ResetDashboard({
       resetScore,
     };
   }, [completedMap, grouped]);
-
-  const resetStatus = useMemo(() => {
-    if (progress.resetScore >= 80) {
-      return "FULL RESET";
-    }
-
-    if (progress.resetScore >= 50) {
-      return "SOLID DAY";
-    }
-
-    if (progress.resetScore >= 25) {
-      return "MINIMUM WIN";
-    }
-
-    return "RECOVERY DAY";
-  }, [progress.resetScore]);
 
   function toggleHabit(habit: Habit) {
     if (isLocked) {
@@ -278,7 +270,9 @@ export function ResetDashboard({
     <div className="p-3 sm:p-4 md:p-6">
       <BootHeader
         totalProtocols={totalProtocols}
-        completedProtocols={completedProtocols}
+        completedProtocols={
+          completedProtocolCount
+        }
       />
 
       <div className="mt-5 grid gap-3 sm:mt-6 sm:gap-4 lg:grid-cols-[1.1fr_0.9fr]">
@@ -347,39 +341,6 @@ export function ResetDashboard({
             />
           </TerminalBlock>
 
-          <TerminalBlock title="reset.score">
-            <div className="mb-2 flex items-center justify-between">
-              <span className="terminal-muted text-xs">
-                SIGNAL STRENGTH
-              </span>
-              <span className="terminal-green text-xs">
-                {progress.resetScore}%
-              </span>
-            </div>
-
-            <div className="h-3 overflow-hidden border border-[#242424] bg-[#080808]">
-              <div
-                className="h-full bg-[#39ff88] transition-all"
-                style={{
-                  width: `${progress.resetScore}%`,
-                }}
-              />
-            </div>
-
-            <p className="terminal-muted mt-3 text-xs">
-              &gt; {resetStatus}. Minimum version counts.
-            </p>
-          </TerminalBlock>
-
-          <TerminalBlock title="directive.output">
-            <p className="terminal-green terminal-cursor text-base leading-7">
-              Do not negotiate with the old program.
-            </p>
-            <p className="terminal-muted mt-3 leading-6">
-              Show up today. Log the signal. Rebuild the
-              pattern. Run the reset.
-            </p>
-          </TerminalBlock>
         </div>
 
         <div className="space-y-4">
@@ -393,12 +354,20 @@ export function ResetDashboard({
               targetId="daily"
             />
             <JumpButton
+              label="run shutdown_protocol.exe"
+              targetId="night"
+            />
+            <JumpButton
               label="log body_data"
               targetId="body-data"
             />
             <JumpButton
               label="open nutrition_input"
               targetId="nutrition-input"
+            />
+            <JumpButton
+              label="open dream_archive"
+              targetId="dream-archive"
             />
             <JumpButton
               label="open reflection_log"
@@ -409,16 +378,8 @@ export function ResetDashboard({
               targetId="shadow-console"
             />
             <JumpButton
-              label="open dream_archive"
-              targetId="dream-archive"
-            />
-            <JumpButton
               label="open ai_reflection"
               targetId="ai-reflection"
-            />
-            <JumpButton
-              label="run shutdown_protocol.exe"
-              targetId="night"
             />
             <JumpButton
               label="confirm sleep_boundary"
@@ -441,88 +402,6 @@ export function ResetDashboard({
             </p>
           </TerminalBlock>
 
-          <TerminalBlock title="day.lock">
-            <TerminalRow
-              label="TODAY"
-              value={isLocked ? "FINALIZED" : "EDITABLE"}
-              green={isLocked}
-            />
-
-            <TerminalRow
-              label="SNAPSHOT"
-              value={
-                hasResetRecord
-                  ? `${progress.resetScore}% SAVED`
-                  : "NO SNAPSHOT"
-              }
-              green={hasResetRecord}
-            />
-
-            {lockedAt ? (
-              <p className="terminal-muted mt-3 text-xs leading-6">
-                &gt; Locked{" "}
-                {formatLockTimestamp(
-                  lockedAt,
-                  timeZone
-                )}.
-              </p>
-            ) : (
-              <p className="terminal-muted mt-3 text-xs leading-6">
-                &gt; Lock today after the final protocol update.
-                Unlocking restores checklist editing.
-              </p>
-            )}
-
-            <button
-              type="button"
-              onClick={toggleDayLock}
-              disabled={
-                isPending ||
-                isLockPending ||
-                (!hasResetRecord && !isLocked)
-              }
-              className={
-                isLocked
-                  ? "mt-3 min-h-[44px] w-full border border-[#ffb020] bg-[#080808] px-3 py-2 text-left text-xs text-[#ffb020] transition hover:bg-[#0d0d0d] disabled:cursor-not-allowed disabled:opacity-50"
-                  : "mt-3 min-h-[44px] w-full border border-[#39ff88] bg-[#080808] px-3 py-2 text-left text-xs text-[#39ff88] transition hover:bg-[#0d0d0d] disabled:cursor-not-allowed disabled:opacity-50"
-              }
-            >
-              &gt;{" "}
-              {isLockPending
-                ? "updating_day_lock..."
-                : isLocked
-                  ? "unlock_today"
-                  : "lock_today"}
-            </button>
-
-            {lockError ? (
-              <p className="mt-3 text-xs text-[#ff4d4d]">
-                &gt; {lockError}
-              </p>
-            ) : null}
-          </TerminalBlock>
-
-          <TerminalBlock title="save.status">
-            <p
-              className={
-                saveError
-                  ? "text-[#ff4d4d]"
-                  : isPending
-                    ? "text-[#ffb020]"
-                    : "terminal-green"
-              }
-            >
-              {saveError
-                ? `> Sync failed: ${saveError}`
-                : isPending
-                  ? "> Saving habit + routine scores..."
-                  : "> All signals synced to Supabase."}
-            </p>
-
-            <p className="terminal-muted mt-2 break-all text-xs">
-              &gt; session: {userEmail}
-            </p>
-          </TerminalBlock>
         </div>
       </div>
 
@@ -568,12 +447,107 @@ export function ResetDashboard({
         />
       </div>
 
+      {children ? (
+        <div className="mt-4">
+          {children}
+        </div>
+      ) : null}
+
+      <div className="mt-4">
+        <TerminalBlock title="day.lock">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <TerminalRow
+              label="TODAY"
+              value={isLocked ? "FINALIZED" : "EDITABLE"}
+              green={isLocked}
+            />
+
+            <TerminalRow
+              label="SNAPSHOT"
+              value={
+                hasResetRecord
+                  ? `${progress.resetScore}% SAVED`
+                  : "NO SNAPSHOT"
+              }
+              green={hasResetRecord}
+            />
+          </div>
+
+          {lockedAt ? (
+            <p className="terminal-muted mt-3 text-xs leading-6">
+              &gt; Locked{" "}
+              {formatLockTimestamp(
+                lockedAt,
+                timeZone
+              )}.
+            </p>
+          ) : (
+            <p className="terminal-muted mt-3 text-xs leading-6">
+              &gt; Lock today after the final protocol update.
+              Unlocking restores checklist editing.
+            </p>
+          )}
+
+          <button
+            type="button"
+            onClick={toggleDayLock}
+            disabled={
+              isPending ||
+              isLockPending ||
+              (!hasResetRecord && !isLocked)
+            }
+            className={
+              isLocked
+                ? "mt-3 min-h-[48px] w-full border border-[#ffb020] bg-[#080808] px-3 py-3 text-left text-xs text-[#ffb020] transition hover:bg-[#0d0d0d] disabled:cursor-not-allowed disabled:opacity-50"
+                : "mt-3 min-h-[48px] w-full border border-[#39ff88] bg-[#080808] px-3 py-3 text-left text-xs text-[#39ff88] transition hover:bg-[#0d0d0d] disabled:cursor-not-allowed disabled:opacity-50"
+            }
+          >
+            &gt;{" "}
+            {isLockPending
+              ? "updating_day_lock..."
+              : isLocked
+                ? "unlock_today"
+                : "lock_today"}
+          </button>
+
+          {lockError ? (
+            <p className="mt-3 text-xs text-[#ff4d4d]">
+              &gt; {lockError}
+            </p>
+          ) : null}
+        </TerminalBlock>
+      </div>
+
       <div className="terminal-muted mt-6 border-t border-[#242424] pt-4 text-xs leading-6">
         <p>&gt; Habit engine online.</p>
         <p>
           &gt; Routine score history synced to Supabase.
         </p>
         <p>&gt; User authenticated.</p>
+      </div>
+
+      <div className="mt-4">
+        <TerminalBlock title="save.status">
+          <p
+            className={
+              saveError
+                ? "text-[#ff4d4d]"
+                : isPending
+                  ? "text-[#ffb020]"
+                  : "terminal-green"
+            }
+          >
+            {saveError
+              ? `> Sync failed: ${saveError}`
+              : isPending
+                ? "> Saving habit + routine scores..."
+                : "> All signals synced to Supabase."}
+          </p>
+
+          <p className="terminal-muted mt-2 break-all text-xs">
+            &gt; session: {userEmail}
+          </p>
+        </TerminalBlock>
       </div>
     </div>
   );
