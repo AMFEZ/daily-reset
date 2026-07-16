@@ -387,21 +387,6 @@ export function ResetDashboard({
             />
           </TerminalBlock>
 
-          <TerminalBlock title="reflection.archive">
-            <p className="terminal-muted leading-6">
-              Capture the signal before the system deletes
-              it.
-            </p>
-            <p className="terminal-green mt-2">
-              [ REFLECTION ] [ RECALL ] [ SHADOW ] [ DREAM
-              NOTE ]
-            </p>
-            <p className="terminal-muted mt-3 text-xs">
-              &gt; Reflection Log and Dream Archive active
-              below.
-            </p>
-          </TerminalBlock>
-
         </div>
       </div>
 

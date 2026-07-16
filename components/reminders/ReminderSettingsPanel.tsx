@@ -1,6 +1,5 @@
 "use client";
 
-import { createClient } from "@/utils/supabase/client";
 import {
   useEffect,
   useMemo,
@@ -68,8 +67,6 @@ const REMINDER_DESCRIPTIONS: Record<
 export function ReminderSettingsPanel({
   initialReminders,
 }: ReminderSettingsPanelProps) {
-  const supabase = createClient();
-
   const [reminders, setReminders] =
     useState<ReminderSetting[]>(
       normalizeReminders(initialReminders)
@@ -181,7 +178,8 @@ export function ReminderSettingsPanel({
     startSaving(async () => {
       const payload = reminders.map(
         (reminder) => ({
-          reminder_key: reminder.reminder_key,
+          reminder_key:
+            reminder.reminder_key,
           time_local: normalizeTime(
             reminder.time_local
           ),
@@ -189,44 +187,78 @@ export function ReminderSettingsPanel({
         })
       );
 
-      const { data: rawData, error } =
-        await supabase.rpc(
-          "save_daily_reset_reminders",
+      try {
+        const response = await fetch(
+          "/api/reminders",
           {
-            target_reminders: payload,
-            target_timezone: deviceTimezone,
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            credentials: "same-origin",
+            cache: "no-store",
+            body: JSON.stringify({
+              reminders: payload,
+              timezone: deviceTimezone,
+            }),
           }
         );
 
-      if (error) {
+        const responsePayload =
+          (await response
+            .json()
+            .catch(() => null)) as
+            | {
+                reminders?: SavedReminderRow[];
+                error?: string;
+              }
+            | null;
+
+        if (!response.ok) {
+          throw new Error(
+            responsePayload?.error ??
+              "Reminder schedule could not be saved."
+          );
+        }
+
+        const savedRows =
+          responsePayload?.reminders ?? [];
+
+        if (savedRows.length === 0) {
+          throw new Error(
+            "The reminder schedule saved, but no updated rows were returned."
+          );
+        }
+
+        const normalized =
+          normalizeReminders(savedRows);
+
+        setReminders(normalized);
+        setStatusMessage(
+          "Reminder schedule synced to Supabase."
+        );
+
+        window.dispatchEvent(
+          new CustomEvent(
+            "daily-reset-reminders-updated",
+            {
+              detail: normalized,
+            }
+          )
+        );
+      } catch (error) {
         console.error(
           "Reminder settings save failed:",
-          error.message
+          error
         );
-        setErrorMessage(error.message);
-        return;
+
+        setErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "Reminder schedule could not be saved."
+        );
       }
-
-      const savedRows = (
-        rawData ?? []
-      ) as unknown as SavedReminderRow[];
-
-      const normalized =
-        normalizeReminders(savedRows);
-
-      setReminders(normalized);
-      setStatusMessage(
-        "Reminder schedule synced to Supabase."
-      );
-
-      window.dispatchEvent(
-        new CustomEvent(
-          "daily-reset-reminders-updated",
-          {
-            detail: normalized,
-          }
-        )
-      );
     });
   }
 
