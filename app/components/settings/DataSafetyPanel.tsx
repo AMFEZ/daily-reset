@@ -1,0 +1,690 @@
+"use client";
+
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useTransition,
+} from "react";
+
+type DatasetStatus =
+  | "ready"
+  | "unavailable";
+
+type DatasetResult = {
+  count: number;
+  status: DatasetStatus;
+  error: string | null;
+};
+
+type ExportSummary = {
+  generated_at: string;
+  total_records: number;
+  ready_datasets: number;
+  total_datasets: number;
+  unavailable_datasets: string[];
+  manifest: Record<
+    string,
+    DatasetResult
+  >;
+};
+
+type ExportPayload = {
+  schema_version: string;
+  app_version: string;
+  generated_at: string;
+  manifest: {
+    total_records: number;
+    ready_datasets: number;
+    total_datasets: number;
+    unavailable_datasets: string[];
+  };
+};
+
+type DownloadState = {
+  filename: string;
+  generatedAt: string;
+  checksum: string;
+  sizeBytes: number;
+};
+
+const LAST_EXPORT_KEY =
+  "daily-reset-last-export";
+
+const DATASET_LABELS: Record<
+  string,
+  string
+> = {
+  profiles: "Profile",
+  settings: "Settings",
+  reminders: "Reminders",
+  habits: "Protocols",
+  habit_logs: "Protocol Logs",
+  reset_scores: "Reset Scores",
+  weight_logs: "Weight Logs",
+  protein_logs: "Protein Logs",
+  journal_entries: "Journal Entries",
+  ai_reflections: "AI Reflections",
+};
+
+export function DataSafetyPanel() {
+  const [summary, setSummary] =
+    useState<ExportSummary | null>(
+      null
+    );
+  const [summaryError, setSummaryError] =
+    useState<string | null>(null);
+  const [downloadError, setDownloadError] =
+    useState<string | null>(null);
+  const [downloadState, setDownloadState] =
+    useState<DownloadState | null>(
+      null
+    );
+  const [lastExportAt, setLastExportAt] =
+    useState<string | null>(null);
+  const [
+    isRefreshing,
+    startRefreshing,
+  ] = useTransition();
+  const [
+    isDownloading,
+    startDownloading,
+  ] = useTransition();
+
+  useEffect(() => {
+    setLastExportAt(
+      window.localStorage.getItem(
+        LAST_EXPORT_KEY
+      )
+    );
+
+    // Inventory is intentionally manual during startup. Click refresh
+    // after the dashboard has hydrated to query the export endpoint.
+  }, []);
+
+  const datasetEntries = useMemo(
+    () =>
+      summary
+        ? Object.entries(
+            summary.manifest
+          ).sort(([left], [right]) =>
+            left.localeCompare(right)
+          )
+        : [],
+    [summary]
+  );
+
+  async function fetchSummary() {
+    const response = await fetch(
+      "/api/export-data?mode=summary",
+      {
+        method: "GET",
+        cache: "no-store",
+        credentials: "same-origin",
+      }
+    );
+
+    const payload =
+      (await response.json()) as
+        | ExportSummary
+        | { error?: string };
+
+    if (!response.ok) {
+      throw new Error(
+        "error" in payload &&
+          payload.error
+          ? payload.error
+          : "Data inventory failed."
+      );
+    }
+
+    return payload as ExportSummary;
+  }
+
+  async function refreshInventory() {
+    setSummaryError(null);
+
+    try {
+      const nextSummary =
+        await fetchSummary();
+
+      setSummary(nextSummary);
+    } catch (error) {
+      setSummaryError(
+        error instanceof Error
+          ? error.message
+          : "Data inventory failed."
+      );
+    }
+  }
+
+  function handleRefresh() {
+    startRefreshing(async () => {
+      await refreshInventory();
+    });
+  }
+
+  function downloadBackup() {
+    setDownloadError(null);
+    setDownloadState(null);
+
+    startDownloading(async () => {
+      try {
+        const response = await fetch(
+          "/api/export-data",
+          {
+            method: "GET",
+            cache: "no-store",
+            credentials: "same-origin",
+          }
+        );
+
+        if (!response.ok) {
+          const errorPayload =
+            (await response
+              .json()
+              .catch(() => null)) as
+              | { error?: string }
+              | null;
+
+          throw new Error(
+            errorPayload?.error ??
+              "Backup generation failed."
+          );
+        }
+
+        const text =
+          await response.text();
+        const parsed =
+          JSON.parse(
+            text
+          ) as ExportPayload;
+
+        if (
+          parsed.schema_version !==
+          "daily-reset-export-v1"
+        ) {
+          throw new Error(
+            "The backup schema could not be verified."
+          );
+        }
+
+        const checksum =
+          await calculateSha256(text);
+
+        const filename =
+          extractFilename(
+            response.headers.get(
+              "Content-Disposition"
+            )
+          ) ??
+          `daily-reset-backup-${new Date()
+            .toISOString()
+            .slice(0, 10)}.json`;
+
+        downloadTextFile(
+          filename,
+          text,
+          "application/json"
+        );
+
+        downloadTextFile(
+          `${filename}.sha256.txt`,
+          [
+            checksum,
+            `  ${filename}`,
+            "",
+            "SHA-256 checksum generated by Daily Reset Alpha 0.33.",
+          ].join("\n"),
+          "text/plain"
+        );
+
+        const now =
+          new Date().toISOString();
+
+        window.localStorage.setItem(
+          LAST_EXPORT_KEY,
+          now
+        );
+        setLastExportAt(now);
+
+        setDownloadState({
+          filename,
+          generatedAt:
+            parsed.generated_at,
+          checksum,
+          sizeBytes:
+            new Blob([text]).size,
+        });
+
+        await refreshInventory();
+      } catch (error) {
+        setDownloadError(
+          error instanceof Error
+            ? error.message
+            : "Backup generation failed."
+        );
+      }
+    });
+  }
+
+  const systemState =
+    !summary
+      ? "CHECKING"
+      : summary.unavailable_datasets
+            .length > 0
+        ? "DEGRADED"
+        : "READY";
+
+  return (
+    <section className="border border-[#242424] bg-[#050505]">
+      <div className="border-b border-[#242424] bg-[#0d0d0d] px-3 py-2">
+        <p className="terminal-green text-xs uppercase tracking-[0.2em]">
+          &gt; data.safety
+        </p>
+      </div>
+
+      <div className="p-3">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <Metric
+            label="SYSTEM"
+            value={systemState}
+            green={systemState === "READY"}
+            warning={
+              systemState === "DEGRADED"
+            }
+          />
+
+          <Metric
+            label="DATASETS"
+            value={
+              summary
+                ? `${summary.ready_datasets} / ${summary.total_datasets}`
+                : "--"
+            }
+            green={
+              summary?.ready_datasets ===
+              summary?.total_datasets
+            }
+          />
+
+          <Metric
+            label="RECORDS"
+            value={
+              summary
+                ? String(
+                    summary.total_records
+                  )
+                : "--"
+            }
+            green={
+              (summary?.total_records ??
+                0) > 0
+            }
+          />
+
+          <Metric
+            label="LAST EXPORT"
+            value={
+              lastExportAt
+                ? formatDateTime(
+                    lastExportAt
+                  )
+                : "NEVER"
+            }
+            green={Boolean(lastExportAt)}
+          />
+        </div>
+
+        <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_0.8fr]">
+          <section className="border border-[#242424] bg-[#080808] p-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="terminal-green text-xs uppercase tracking-[0.18em]">
+                  &gt; cloud.inventory
+                </p>
+
+                <p className="terminal-muted mt-2 text-xs leading-5">
+                  Checks each authenticated
+                  Supabase dataset before export.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+                className="min-h-[44px] border border-[#242424] px-3 text-xs text-[#e5e5e5] transition hover:border-[#39ff88] hover:text-[#39ff88] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                &gt;{" "}
+                {isRefreshing
+                  ? "checking..."
+                  : "refresh"}
+              </button>
+            </div>
+
+            <div className="mt-4 grid gap-2 sm:grid-cols-2">
+              {datasetEntries.map(
+                ([name, result]) => (
+                  <DatasetCard
+                    key={name}
+                    name={name}
+                    result={result}
+                  />
+                )
+              )}
+
+              {!summary &&
+              !summaryError ? (
+                <p className="terminal-muted text-xs leading-6">
+                  &gt; Inventory idle. Click refresh after the dashboard loads.
+                </p>
+              ) : null}
+            </div>
+
+            {summaryError ? (
+              <p className="mt-4 text-xs leading-6 text-[#ff6b6b]">
+                &gt; {summaryError}
+              </p>
+            ) : null}
+          </section>
+
+          <section className="border border-[#242424] bg-[#080808] p-3">
+            <p className="terminal-green text-xs uppercase tracking-[0.18em]">
+              &gt; backup.generator
+            </p>
+
+            <div className="terminal-muted mt-3 space-y-2 text-xs leading-6">
+              <p>
+                &gt; Creates a readable JSON
+                archive of your authenticated
+                database records.
+              </p>
+
+              <p>
+                &gt; Downloads a matching SHA-256
+                checksum file for verification.
+              </p>
+
+              <p>
+                &gt; Passwords, login tokens, and
+                secret keys are excluded.
+              </p>
+
+              <p>
+                &gt; Audio paths are included, but
+                raw Storage files are not embedded.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={downloadBackup}
+              disabled={
+                isDownloading ||
+                !summary ||
+                summary.ready_datasets === 0
+              }
+              className="mt-4 min-h-[52px] w-full border border-[#39ff88] bg-[#050505] px-4 py-3 text-left text-sm text-[#39ff88] transition hover:bg-[#0d0d0d] disabled:cursor-not-allowed disabled:border-[#242424] disabled:text-[#555555]"
+            >
+              &gt;{" "}
+              {isDownloading
+                ? "generating_backup..."
+                : "download_backup"}
+            </button>
+
+            {downloadState ? (
+              <div className="mt-4 border border-[#39ff88] bg-[#08100b] p-3">
+                <p className="terminal-green text-xs">
+                  &gt; Backup verified and
+                  downloaded.
+                </p>
+
+                <DetailRow
+                  label="FILE"
+                  value={
+                    downloadState.filename
+                  }
+                />
+                <DetailRow
+                  label="SIZE"
+                  value={formatBytes(
+                    downloadState.sizeBytes
+                  )}
+                />
+                <DetailRow
+                  label="GENERATED"
+                  value={formatDateTime(
+                    downloadState.generatedAt
+                  )}
+                />
+                <DetailRow
+                  label="SHA-256"
+                  value={`${downloadState.checksum.slice(
+                    0,
+                    16
+                  )}…`}
+                />
+              </div>
+            ) : null}
+
+            {downloadError ? (
+              <p className="mt-4 text-xs leading-6 text-[#ff6b6b]">
+                &gt; {downloadError}
+              </p>
+            ) : null}
+          </section>
+        </div>
+
+        <div className="mt-4 border border-[#ffb020] bg-[#100d06] p-3">
+          <p className="text-xs uppercase tracking-[0.16em] text-[#ffb020]">
+            &gt; privacy.warning
+          </p>
+
+          <p className="terminal-muted mt-2 text-xs leading-6">
+            The backup can contain journals,
+            dreams, reflections, health logs, and
+            routine history. Store it somewhere
+            private and do not upload it publicly.
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function DatasetCard({
+  name,
+  result,
+}: {
+  name: string;
+  result: DatasetResult;
+}) {
+  const ready =
+    result.status === "ready";
+
+  return (
+    <div
+      className={[
+        "border p-3",
+        ready
+          ? "border-[#242424] bg-[#050505]"
+          : "border-[#ffb020] bg-[#100d06]",
+      ].join(" ")}
+      title={result.error ?? undefined}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs text-[#e5e5e5]">
+          {DATASET_LABELS[name] ??
+            name}
+        </p>
+
+        <span
+          className={
+            ready
+              ? "terminal-green text-[10px]"
+              : "text-[10px] text-[#ffb020]"
+          }
+        >
+          {ready ? "READY" : "UNAVAILABLE"}
+        </span>
+      </div>
+
+      <p className="terminal-muted mt-2 text-[10px]">
+        {result.count} records
+      </p>
+    </div>
+  );
+}
+
+function DetailRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="terminal-line mt-2 flex items-start justify-between gap-4 pt-2 text-[10px]">
+      <span className="terminal-muted">
+        {label}
+      </span>
+
+      <span className="max-w-[70%] break-all text-right text-[#e5e5e5]">
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function Metric({
+  label,
+  value,
+  green = false,
+  warning = false,
+}: {
+  label: string;
+  value: string;
+  green?: boolean;
+  warning?: boolean;
+}) {
+  const valueClassName = green
+    ? "terminal-green"
+    : warning
+      ? "text-[#ffb020]"
+      : "text-[#e5e5e5]";
+
+  return (
+    <div className="border border-[#242424] bg-[#080808] p-3">
+      <p className="terminal-muted text-[10px] uppercase tracking-[0.18em]">
+        {label}
+      </p>
+
+      <p className={`mt-2 text-sm ${valueClassName}`}>
+        {value}
+      </p>
+    </div>
+  );
+}
+
+async function calculateSha256(
+  value: string
+) {
+  if (!window.crypto?.subtle) {
+    return "SHA-256 unavailable";
+  }
+
+  const bytes = new TextEncoder().encode(
+    value
+  );
+  const digest =
+    await window.crypto.subtle.digest(
+      "SHA-256",
+      bytes
+    );
+
+  return Array.from(
+    new Uint8Array(digest)
+  )
+    .map((byte) =>
+      byte.toString(16).padStart(2, "0")
+    )
+    .join("");
+}
+
+function downloadTextFile(
+  filename: string,
+  content: string,
+  type: string
+) {
+  const blob = new Blob([content], {
+    type: `${type};charset=utf-8`,
+  });
+  const url =
+    URL.createObjectURL(blob);
+  const anchor =
+    document.createElement("a");
+
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.rel = "noopener";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+
+  window.setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 1_000);
+}
+
+function extractFilename(
+  contentDisposition: string | null
+) {
+  if (!contentDisposition) {
+    return null;
+  }
+
+  const match =
+    contentDisposition.match(
+      /filename="([^"]+)"/i
+    );
+
+  return match?.[1] ?? null;
+}
+
+function formatDateTime(
+  value: string
+) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat(
+    "en-US",
+    {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }
+  ).format(date);
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1_024) {
+    return `${bytes} B`;
+  }
+
+  if (bytes < 1_048_576) {
+    return `${(
+      bytes / 1_024
+    ).toFixed(1)} KB`;
+  }
+
+  return `${(
+    bytes / 1_048_576
+  ).toFixed(1)} MB`;
+}

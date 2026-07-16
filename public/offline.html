@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#000000" />
+    <title>Daily Reset — Offline</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco,
+          Consolas, "Liberation Mono", monospace;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: #000;
+        color: #e5e5e5;
+      }
+
+      main {
+        width: min(100%, 560px);
+        border: 1px solid #242424;
+        background: #050505;
+      }
+
+      header {
+        border-bottom: 1px solid #242424;
+        background: #0d0d0d;
+        padding: 12px 16px;
+        color: #39ff88;
+        font-size: 12px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+
+      section {
+        padding: 20px 16px;
+      }
+
+      p {
+        margin: 0 0 12px;
+        font-size: 13px;
+        line-height: 1.7;
+      }
+
+      .muted {
+        color: #8a8a8a;
+      }
+
+      button {
+        width: 100%;
+        min-height: 48px;
+        margin-top: 8px;
+        border: 1px solid #39ff88;
+        background: #050505;
+        color: #39ff88;
+        font: inherit;
+        text-align: left;
+        padding: 12px 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>&gt; connection.offline</header>
+      <section>
+        <p>&gt; Daily Reset cannot reach the server.</p>
+        <p class="muted">
+          Your Supabase data remains safe. Reconnect before logging or
+          changing protocols so the cloud snapshot stays accurate.
+        </p>
+        <button type="button" onclick="window.location.reload()">
+          &gt; retry_connection
+        </button>
+      </section>
+    </main>
+  </body>
+</html>

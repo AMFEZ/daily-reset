@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1"
+    />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>Daily Reset — PWA Recovery</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco,
+          Consolas, "Liberation Mono", monospace;
+        background: #000;
+        color: #e5e5e5;
+      }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        padding: 16px;
+        box-sizing: border-box;
+      }
+
+      main {
+        width: min(680px, 100%);
+        border: 1px solid #39ff88;
+        background: #050505;
+      }
+
+      header {
+        border-bottom: 1px solid #242424;
+        background: #0d0d0d;
+        padding: 12px 16px;
+        color: #39ff88;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        font-size: 12px;
+      }
+
+      section {
+        padding: 16px;
+      }
+
+      p {
+        color: #9a9a9a;
+        line-height: 1.7;
+        font-size: 13px;
+      }
+
+      button,
+      a {
+        min-height: 48px;
+        box-sizing: border-box;
+        display: block;
+        width: 100%;
+        margin-top: 12px;
+        border: 1px solid #39ff88;
+        background: #080808;
+        color: #39ff88;
+        padding: 14px;
+        text-align: left;
+        font: inherit;
+        cursor: pointer;
+        text-decoration: none;
+      }
+
+      #status {
+        white-space: pre-wrap;
+        border-top: 1px solid #242424;
+        margin-top: 16px;
+        padding-top: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>&gt; pwa.recovery</header>
+
+      <section>
+        <p>
+          This utility unregisters Daily Reset service workers and
+          deletes its browser caches for the current origin. It does
+          not delete Supabase data, passwords, journals, or settings.
+        </p>
+
+        <button id="reset" type="button">
+          &gt; clear_service_worker_and_cache
+        </button>
+
+        <a href="/" id="home">
+          &gt; return_home
+        </a>
+
+        <p id="status">&gt; Ready.</p>
+      </section>
+    </main>
+
+    <script>
+      const button = document.getElementById("reset");
+      const status = document.getElementById("status");
+
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        status.textContent = "> Cleaning browser PWA state...";
+
+        const messages = [];
+
+        try {
+          if ("serviceWorker" in navigator) {
+            const registrations =
+              await navigator.serviceWorker.getRegistrations();
+
+            for (const registration of registrations) {
+              const removed = await registration.unregister();
+              messages.push(
+                `service worker ${registration.scope}: ${
+                  removed ? "removed" : "not removed"
+                }`
+              );
+            }
+
+            if (registrations.length === 0) {
+              messages.push("service workers: none found");
+            }
+          } else {
+            messages.push("service workers: unsupported");
+          }
+
+          if ("caches" in window) {
+            const keys = await caches.keys();
+
+            for (const key of keys) {
+              const removed = await caches.delete(key);
+              messages.push(
+                `cache ${key}: ${removed ? "removed" : "not removed"}`
+              );
+            }
+
+            if (keys.length === 0) {
+              messages.push("caches: none found");
+            }
+          }
+
+          status.textContent =
+            "> Recovery complete.\n> " +
+            messages.join("\n> ") +
+            "\n> Close this tab, restart the dev server, and reopen /.";
+
+          button.textContent = "> recovery_complete";
+        } catch (error) {
+          status.textContent =
+            "> Recovery failed.\n> " +
+            (error instanceof Error
+              ? error.message
+              : String(error));
+          button.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>
