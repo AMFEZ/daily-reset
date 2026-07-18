@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { logout } from "@/app/login/actions";
 import { PWAController } from "@/components/pwa/PWAController";
 import { SettingsRuntime } from "@/components/settings/SettingsRuntime";
+import { SettingsHub } from "@/components/settings/SettingsHub";
 import { SettingsAccountPanel, type UserSettings } from "@/components/settings/SettingsAccountPanel";
 import { DataSafetyPanel } from "@/components/settings/DataSafetyPanel";
 import { ReleaseReadinessPanel } from "@/components/settings/ReleaseReadinessPanel";
@@ -680,134 +681,140 @@ export default async function Home() {
                   />
                 </ModuleAccordion>
 
-                <ModuleAccordion
-                  id="reminder-center"
-                  title="reminder.center"
-                  subtitle="Cloud-synced routine notification schedule"
-                >
-                  <ReminderSettingsPanel
-                    initialReminders={
-                      initialReminders
-                    }
-                  />
-                </ModuleAccordion>
-
-                <ModuleAccordion
-                  id="protocol-manager"
-                  title="protocol.manager"
-                  subtitle="Create, edit, reorder, disable, and restore protocols"
-                >
-                  <ProtocolManagerPanel
-                    initialProtocols={
-                      managedProtocols
-                    }
-                  />
-                </ModuleAccordion>
-
-                <ModuleAccordion
-                  id="settings-account"
-                  title="settings.account"
-                  subtitle="Preferences, timezone, display, and password"
-                >
-                  <SettingsAccountPanel
-                    userEmail={
-                      user.email ?? "ONLINE"
-                    }
-                    initialSettings={
-                      initialSettings
-                    }
-                  />
-                </ModuleAccordion>
-
-                <ModuleAccordion
-                  id="data-safety"
-                  title="data.safety"
-                  subtitle="Authenticated backup, inventory, and checksum"
-                >
-                  <DataSafetyPanel />
-                </ModuleAccordion>
-
-                <ModuleAccordion
-                  id="release-readiness"
-                  title="release.readiness"
-                  subtitle="Automated health checks and V1 deployment audit"
-                >
-                  <ReleaseReadinessPanel />
-                </ModuleAccordion>
-
-                <ModuleAccordion
-                  id="deployment-control"
-                  title="deployment.control"
-                  subtitle="Version, environment, PWA, and production status"
-                >
-                  <ProductionDeploymentPanel />
-                </ModuleAccordion>
               </div>
 
-              <div className="mt-4">
-                <ModuleAccordion
-                  id="reset-analytics"
-                  title="reset.analytics"
-                  subtitle={`${streakStats.currentStreak}-day current streak · ${streakStats.bestStreak}-day best · ${streakStats.savedLast7}/7 saved recently`}
-                >
-                  <div className="space-y-4">
-                    <ResetStreakPanel
-                      stats={streakStats}
+              <SettingsHub>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  <ModuleAccordion
+                    id="reminder-center"
+                    title="reminder.center"
+                    subtitle="Cloud-synced routine notification schedule"
+                  >
+                    <ReminderSettingsPanel
+                      initialReminders={
+                        initialReminders
+                      }
                     />
+                  </ModuleAccordion>
 
-                    <WeeklyResetPanel />
-
-                    <ResetCalendarPanel />
-
-                    <RoutineTrendPanel />
-
-                    <ProtocolReliabilityPanel />
-
-                    <ResetHistoryPanel
-                      initialScores={(
-                        resetScores ?? []
-                      ).map((score) => ({
-                        id: score.id,
-                        date: score.date,
-                        morning_score: Number(
-                          score.morning_score ?? 0
-                        ),
-                        daily_score: Number(
-                          score.daily_score ?? 0
-                        ),
-                        night_score: Number(
-                          score.night_score ?? 0
-                        ),
-                        trust_score: Number(
-                          score.trust_score ?? 0
-                        ),
-                        reset_score: Number(
-                          score.reset_score ?? 0
-                        ),
-                        completed_protocols: Number(
-                          score.completed_protocols ?? 0
-                        ),
-                        total_protocols: Number(
-                          score.total_protocols ?? 0
-                        ),
-                        system_status:
-                          score.system_status ??
-                          "NO STATUS",
-                        consistency_signal:
-                          score.consistency_signal ??
-                          "NO SIGNAL",
-                        is_locked: Boolean(
-                          score.is_locked
-                        ),
-                        locked_at:
-                          score.locked_at ?? null,
-                        created_at:
-                          score.created_at,
-                      }))}
+                  <ModuleAccordion
+                    id="protocol-manager"
+                    title="protocol.manager"
+                    subtitle="Create, edit, reorder, disable, and restore protocols"
+                  >
+                    <ProtocolManagerPanel
+                      initialProtocols={
+                        managedProtocols
+                      }
                     />
-                  </div>
-                </ModuleAccordion>
-              </div>
+                  </ModuleAccordion>
+
+                  <ModuleAccordion
+                    id="settings-account"
+                    title="settings.account"
+                    subtitle="Preferences, timezone, display, and password"
+                  >
+                    <SettingsAccountPanel
+                      userEmail={
+                        user.email ?? "ONLINE"
+                      }
+                      initialSettings={
+                        initialSettings
+                      }
+                    />
+                  </ModuleAccordion>
+
+                  <ModuleAccordion
+                    id="data-safety"
+                    title="data.safety"
+                    subtitle="Authenticated backup, inventory, and checksum"
+                  >
+                    <DataSafetyPanel />
+                  </ModuleAccordion>
+
+                  <ModuleAccordion
+                    id="release-readiness"
+                    title="release.readiness"
+                    subtitle="Automated health checks and V1 deployment audit"
+                  >
+                    <ReleaseReadinessPanel />
+                  </ModuleAccordion>
+
+                  <ModuleAccordion
+                    id="deployment-control"
+                    title="deployment.control"
+                    subtitle="Version, environment, PWA, and production status"
+                  >
+                    <ProductionDeploymentPanel />
+                  </ModuleAccordion>
+                </div>
+
+                <div className="mt-3">
+                  <ModuleAccordion
+                    id="reset-analytics"
+                    title="reset.analytics"
+                    subtitle={`${streakStats.currentStreak}-day current streak · ${streakStats.bestStreak}-day best · ${streakStats.savedLast7}/7 saved recently`}
+                  >
+                    <div className="space-y-4">
+                      <ResetStreakPanel
+                        stats={streakStats}
+                      />
+
+                      <WeeklyResetPanel />
+
+                      <ResetCalendarPanel />
+
+                      <RoutineTrendPanel />
+
+                      <ProtocolReliabilityPanel />
+
+                      <ResetHistoryPanel
+                        initialScores={(
+                          resetScores ?? []
+                        ).map((score) => ({
+                          id: score.id,
+                          date: score.date,
+                          morning_score: Number(
+                            score.morning_score ?? 0
+                          ),
+                          daily_score: Number(
+                            score.daily_score ?? 0
+                          ),
+                          night_score: Number(
+                            score.night_score ?? 0
+                          ),
+                          trust_score: Number(
+                            score.trust_score ?? 0
+                          ),
+                          reset_score: Number(
+                            score.reset_score ?? 0
+                          ),
+                          completed_protocols: Number(
+                            score.completed_protocols ?? 0
+                          ),
+                          total_protocols: Number(
+                            score.total_protocols ?? 0
+                          ),
+                          system_status:
+                            score.system_status ??
+                            "NO STATUS",
+                          consistency_signal:
+                            score.consistency_signal ??
+                            "NO SIGNAL",
+                          is_locked: Boolean(
+                            score.is_locked
+                          ),
+                          locked_at:
+                            score.locked_at ?? null,
+                          created_at:
+                            score.created_at,
+                        }))}
+                      />
+                    </div>
+                  </ModuleAccordion>
+                </div>
+              </SettingsHub>
+
             </div>
             </ResetDashboard>
           </div>
