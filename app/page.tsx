@@ -191,9 +191,21 @@ export default async function Home() {
     throw new Error(allHabitRowsError.message);
   }
 
+  const visibleHabits = (
+    habits ?? []
+  ).filter(
+    (habit) =>
+      !isRetiredProtocol(habit.name)
+  );
+
   const managedProtocols: ManagedProtocol[] = (
     allHabitRows ?? []
-  ).map((habit) => ({
+  )
+    .filter(
+      (habit) =>
+        !isRetiredProtocol(habit.name)
+    )
+    .map((habit) => ({
     id: habit.id,
     name: habit.name,
     category: habit.category,
@@ -356,7 +368,8 @@ export default async function Home() {
     (reflection) => reflection.reflection_type === "dream"
   );
 
-  const totalProtocols = habits?.length ?? 0;
+  const totalProtocols =
+    visibleHabits.length;
 
   const todayReset =
     (resetScores ?? []).find(
@@ -400,7 +413,7 @@ export default async function Home() {
           <div className="space-y-3 sm:space-y-4">
             <ResetDashboard
               userEmail={user.email ?? "ONLINE"}
-              habits={habits ?? []}
+              habits={visibleHabits}
               logs={logs ?? []}
               totalProtocols={totalProtocols}
               initialHasResetRecord={Boolean(todayReset)}
@@ -422,6 +435,9 @@ export default async function Home() {
                   subtitle="Daily weight tracking and trend signals"
                 >
                   <BodyDataPanel
+                    timeZone={
+                      initialSettings.timezone
+                    }
                     initialLogs={(weightLogs ?? []).map(
                       (log) => ({
                         id: log.id,
@@ -808,6 +824,31 @@ export default async function Home() {
   );
 }
 
+
+
+const RETIRED_PROTOCOL_NAMES =
+  new Set([
+    "uptown tonics shot",
+    "night stretches",
+    "leg stretches",
+    "tmj exercises",
+    "tmj excercises",
+    "foam roller",
+  ]);
+
+function isRetiredProtocol(
+  name: string
+) {
+  const normalized = name
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+
+  return RETIRED_PROTOCOL_NAMES.has(
+    normalized
+  );
+}
 
 function getTodayKey(timeZone: string) {
   const parts = new Intl.DateTimeFormat("en-US", {

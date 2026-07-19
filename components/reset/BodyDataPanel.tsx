@@ -19,6 +19,7 @@ type WeightLog = {
 
 type BodyDataPanelProps = {
   initialLogs: WeightLog[];
+  timeZone: string;
 };
 
 type WeightApiResponse = {
@@ -28,22 +29,22 @@ type WeightApiResponse = {
 
 export function BodyDataPanel({
   initialLogs,
+  timeZone,
 }: BodyDataPanelProps) {
   const [isPending, startTransition] =
     useTransition();
   const [logs, setLogs] =
     useState<WeightLog[]>(initialLogs);
-  const [date, setDate] = useState(
-    getLocalDateKey()
-  );
-  const [weight, setWeight] = useState("");
+  const [weight, setWeight] =
+    useState("");
   const [unit, setUnit] =
     useState<WeightUnit>(
       initialLogs[0]?.unit ?? "lbs"
     );
-  const [note, setNote] = useState("");
   const [message, setMessage] =
     useState<string | null>(null);
+
+  const today = getDateKey(timeZone);
 
   const sortedLogs = useMemo(
     () =>
@@ -81,13 +82,12 @@ export function BodyDataPanel({
     const parsedWeight = Number(weight);
 
     if (
-      !date ||
       !weight ||
       !Number.isFinite(parsedWeight) ||
       parsedWeight <= 0
     ) {
       setMessage(
-        "Enter a valid date and weight."
+        "Enter a valid weight."
       );
       return;
     }
@@ -107,10 +107,10 @@ export function BodyDataPanel({
             credentials: "same-origin",
             cache: "no-store",
             body: JSON.stringify({
-              date,
+              date: today,
               weight: parsedWeight,
               unit,
-              note: note.trim() || null,
+              note: null,
             }),
           }
         );
@@ -122,7 +122,10 @@ export function BodyDataPanel({
             | WeightApiResponse
             | null;
 
-        if (!response.ok || !payload?.log) {
+        if (
+          !response.ok ||
+          !payload?.log
+        ) {
           throw new Error(
             payload?.error ??
               "Weight signal could not be saved."
@@ -133,14 +136,17 @@ export function BodyDataPanel({
           payload.log as WeightLog,
           ...current.filter(
             (log) =>
-              log.id !== payload.log?.id &&
-              log.date !== payload.log?.date
+              log.id !==
+                payload.log?.id &&
+              log.date !==
+                payload.log?.date
           ),
         ]);
 
         setWeight("");
-        setNote("");
-        setMessage("Body signal saved.");
+        setMessage(
+          "Today's body signal saved."
+        );
       } catch (error) {
         setMessage(
           error instanceof Error
@@ -156,30 +162,29 @@ export function BodyDataPanel({
       <div className="grid gap-4 lg:grid-cols-[1fr_0.8fr]">
         <div>
           <p className="terminal-muted mb-3 text-xs leading-6">
-            &gt; Log one honest body signal. Saving the
-            same date updates that day instead of creating
-            a duplicate.
+            &gt; Body data always saves to the
+            current app day. Saving again updates
+            today instead of creating a duplicate.
           </p>
 
-          <div className="grid gap-3 sm:grid-cols-3">
-            <label className="block">
-              <FieldLabel>Date</FieldLabel>
-              <input
-                type="date"
-                value={date}
-                onChange={(event) =>
-                  setDate(event.target.value)
-                }
-                className={inputClassName}
-              />
-            </label>
+          <div className="grid gap-3 sm:grid-cols-[1fr_1fr_150px]">
+            <div className="border border-[#242424] bg-[#080808] px-3 py-3">
+              <FieldLabel>
+                App day
+              </FieldLabel>
+              <p className="terminal-green mt-2 text-sm">
+                {today}
+              </p>
+            </div>
 
             <label className="block">
               <FieldLabel>Weight</FieldLabel>
               <input
                 value={weight}
                 onChange={(event) =>
-                  setWeight(event.target.value)
+                  setWeight(
+                    event.target.value
+                  )
                 }
                 inputMode="decimal"
                 placeholder="175.0"
@@ -193,28 +198,21 @@ export function BodyDataPanel({
                 value={unit}
                 onChange={(event) =>
                   setUnit(
-                    event.target.value as WeightUnit
+                    event.target
+                      .value as WeightUnit
                   )
                 }
                 className={inputClassName}
               >
-                <option value="lbs">lbs</option>
-                <option value="kg">kg</option>
+                <option value="lbs">
+                  lbs
+                </option>
+                <option value="kg">
+                  kg
+                </option>
               </select>
             </label>
           </div>
-
-          <label className="mt-3 block">
-            <FieldLabel>Optional note</FieldLabel>
-            <input
-              value={note}
-              onChange={(event) =>
-                setNote(event.target.value)
-              }
-              placeholder="sleep, hydration, training..."
-              className={inputClassName}
-            />
-          </label>
 
           <button
             type="button"
@@ -247,17 +245,25 @@ export function BodyDataPanel({
           />
           <TerminalRow
             label="DATE"
-            value={latest?.date ?? "--"}
+            value={
+              latest?.date ?? "--"
+            }
           />
           <TerminalRow
             label="CHANGE"
             value={trend}
-            green={trend === "STABLE"}
+            green={
+              trend === "STABLE"
+            }
           />
           <TerminalRow
             label="SAVED DAYS"
-            value={String(logs.length)}
-            green={logs.length > 0}
+            value={String(
+              logs.length
+            )}
+            green={
+              logs.length > 0
+            }
           />
         </div>
       </div>
@@ -270,25 +276,30 @@ export function BodyDataPanel({
         >
           <div className="max-h-[320px] overflow-y-auto border border-[#242424]">
             {sortedLogs.length > 0 ? (
-              sortedLogs.map((log, index) => (
-                <div
-                  key={`${log.id}-${log.date}-${index}`}
-                  className="terminal-line grid gap-2 px-3 py-3 text-xs sm:grid-cols-[110px_100px_1fr]"
-                >
-                  <span className="terminal-muted">
-                    {log.date}
-                  </span>
-                  <span className="terminal-green">
-                    {log.weight} {log.unit}
-                  </span>
-                  <span className="terminal-muted">
-                    {log.note ?? "No note"}
-                  </span>
-                </div>
-              ))
+              sortedLogs.map(
+                (log, index) => (
+                  <div
+                    key={`${log.id}-${log.date}-${index}`}
+                    className="terminal-line grid gap-2 px-3 py-3 text-xs sm:grid-cols-[110px_100px_1fr]"
+                  >
+                    <span className="terminal-muted">
+                      {log.date}
+                    </span>
+                    <span className="terminal-green">
+                      {log.weight}{" "}
+                      {log.unit}
+                    </span>
+                    <span className="terminal-muted">
+                      {log.note ??
+                        "Body signal"}
+                    </span>
+                  </div>
+                )
+              )
             ) : (
               <p className="terminal-muted p-3 text-xs">
-                &gt; No body signals logged yet.
+                &gt; No body signals
+                logged yet.
               </p>
             )}
           </div>
@@ -327,7 +338,9 @@ function TerminalBlock({
           &gt; {title}
         </p>
       </div>
-      <div className="p-3">{children}</div>
+      <div className="p-3">
+        {children}
+      </div>
     </section>
   );
 }
@@ -359,14 +372,16 @@ function TerminalRow({
   );
 }
 
-function getLocalDateKey() {
-  const now = new Date();
-  const offset =
-    now.getTimezoneOffset() * 60_000;
-
-  return new Date(
-    now.getTime() - offset
-  )
-    .toISOString()
-    .slice(0, 10);
+function getDateKey(
+  timeZone: string
+) {
+  return new Intl.DateTimeFormat(
+    "en-CA",
+    {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }
+  ).format(new Date());
 }

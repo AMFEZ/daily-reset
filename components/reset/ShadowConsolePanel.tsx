@@ -5,7 +5,7 @@ import {
   useState,
   useTransition,
 } from "react";
-import { DreamAudioRecorder } from "@/components/reset/DreamAudioRecorder";
+import { ContextAudioRecorder } from "@/components/reset/ContextAudioRecorder";
 import { SignalDisclosure } from "@/components/reset/SignalDisclosure";
 import { createClient } from "@/utils/supabase/client";
 
@@ -79,8 +79,6 @@ export function ShadowConsolePanel({
     useState("");
   const [nextAction, setNextAction] =
     useState("");
-  const [energy, setEnergy] =
-    useState("5");
   const [audioPath, setAudioPath] =
     useState<string | null>(null);
   const [
@@ -131,9 +129,6 @@ export function ShadowConsolePanel({
       rawTranscript.trim();
     const cleanCleaned =
       cleanedTranscript.trim();
-    const parsedEnergy =
-      Number(energy);
-
     if (
       cleanResponse.length < 2 &&
       cleanRaw.length < 2 &&
@@ -142,18 +137,6 @@ export function ShadowConsolePanel({
     ) {
       setMessage(
         "Write, record, or transcribe at least one shadow signal."
-      );
-      return;
-    }
-
-    if (
-      energy &&
-      (!Number.isFinite(parsedEnergy) ||
-        parsedEnergy < 1 ||
-        parsedEnergy > 10)
-    ) {
-      setMessage(
-        "Energy must be between 1 and 10."
       );
       return;
     }
@@ -177,9 +160,7 @@ export function ShadowConsolePanel({
             target_response: "",
             target_next_action:
               nextAction.trim(),
-            target_energy: energy
-              ? parsedEnergy
-              : null,
+            target_energy: null,
           })
           .single();
 
@@ -235,7 +216,6 @@ export function ShadowConsolePanel({
 
       setResponse("");
       setNextAction("");
-      setEnergy("5");
       setAudioPath(null);
       setAudioPreviewUrl(null);
       setRawTranscript("");
@@ -350,81 +330,76 @@ export function ShadowConsolePanel({
         />
       </label>
 
-      <div className="mt-3 grid gap-3 sm:grid-cols-[120px_1fr]">
-        <label className="block">
-          <FieldLabel>Energy</FieldLabel>
-          <input
-            value={energy}
-            onChange={(event) =>
-              setEnergy(event.target.value)
-            }
-            inputMode="numeric"
-            placeholder="1-10"
-            className={inputClassName}
-          />
-        </label>
-
-        <label className="block">
-          <FieldLabel>
-            One grounded action
-          </FieldLabel>
-          <input
-            value={nextAction}
-            onChange={(event) =>
-              setNextAction(
-                event.target.value
-              )
-            }
-            placeholder="What will you do with this awareness?"
-            className={inputClassName}
-          />
-        </label>
-      </div>
-
-      <div className="mt-4">
-        <DreamAudioRecorder
-          onAudioUploaded={(
-            path,
-            previewUrl
-          ) => {
-            setAudioPath(path);
-            setAudioPreviewUrl(
-              previewUrl
-            );
-          }}
+      <label className="mt-3 block">
+        <FieldLabel>
+          One grounded action
+        </FieldLabel>
+        <input
+          value={nextAction}
+          onChange={(event) =>
+            setNextAction(
+              event.target.value
+            )
+          }
+          placeholder="What will you do with this awareness?"
+          className={inputClassName}
         />
-      </div>
+      </label>
 
-      {audioPath ? (
-        <div className="mt-3 border border-[#242424] bg-[#030303] p-3">
-          <p className="terminal-green text-xs">
-            &gt; Voice recording attached.
-          </p>
-          <p className="terminal-muted mt-1 break-all text-[10px]">
-            {audioPath}
-          </p>
-          {audioPreviewUrl ? (
-            <audio
-              controls
-              src={audioPreviewUrl}
-              className="mt-3 w-full"
-            />
+      <div className="mt-4 space-y-3">
+        <SignalDisclosure
+          title="shadow.audio.recorder"
+          summary="Record and attach a spoken shadow response"
+        >
+          <ContextAudioRecorder
+            onAudioUploaded={(
+              path,
+              previewUrl
+            ) => {
+              setAudioPath(path);
+              setAudioPreviewUrl(
+                previewUrl
+              );
+            }}
+          />
+
+          {audioPath ? (
+            <div className="mt-3 border border-[#242424] bg-[#030303] p-3">
+              <p className="terminal-green text-xs">
+                &gt; Shadow recording attached.
+              </p>
+              <p className="terminal-muted mt-1 break-all text-[10px]">
+                {audioPath}
+              </p>
+              {audioPreviewUrl ? (
+                <audio
+                  controls
+                  src={audioPreviewUrl}
+                  className="mt-3 w-full"
+                />
+              ) : null}
+            </div>
           ) : null}
-        </div>
-      ) : null}
+        </SignalDisclosure>
 
-      <TranscriptFields
-        rawTranscript={rawTranscript}
-        cleanedTranscript={
-          cleanedTranscript
-        }
-        setRawTranscript={
-          setRawTranscript
-        }
-        setCleanedTranscript={
-          setCleanedTranscript
-        }
-      />
+        <SignalDisclosure
+          title="shadow.transcript"
+          summary="Raw and cleaned shadow transcript"
+        >
+          <TranscriptFields
+            rawTranscript={rawTranscript}
+            cleanedTranscript={
+              cleanedTranscript
+            }
+            setRawTranscript={
+              setRawTranscript
+            }
+            setCleanedTranscript={
+              setCleanedTranscript
+            }
+          />
+        </SignalDisclosure>
+      </div>
 
       <button
         type="button"
@@ -485,13 +460,6 @@ export function ShadowConsolePanel({
                       <p className="whitespace-pre-wrap leading-6">
                         {entry.content}
                       </p>
-
-                      {entry.energy ? (
-                        <p className="terminal-muted mt-2">
-                          energy:{" "}
-                          {entry.energy}/10
-                        </p>
-                      ) : null}
 
                       {entry.audio_path ? (
                         <div className="mt-3 border border-[#242424] bg-[#030303] p-3">
@@ -631,10 +599,7 @@ function TranscriptFields({
   ) => void;
 }) {
   return (
-    <div className="mt-4 border border-[#242424] bg-[#030303] p-3">
-      <p className="terminal-green mb-3 text-xs uppercase tracking-[0.18em]">
-        &gt; transcript
-      </p>
+    <div className="space-y-3">
       <label className="block">
         <FieldLabel>Raw transcript</FieldLabel>
         <textarea

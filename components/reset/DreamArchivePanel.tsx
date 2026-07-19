@@ -6,7 +6,7 @@ import {
   useTransition,
   type ReactNode,
 } from "react";
-import { DreamAudioRecorder } from "@/components/reset/DreamAudioRecorder";
+import { ContextAudioRecorder } from "@/components/reset/ContextAudioRecorder";
 import { SignalDisclosure } from "@/components/reset/SignalDisclosure";
 import { createClient } from "@/utils/supabase/client";
 
@@ -399,7 +399,7 @@ export function DreamArchivePanel({
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <label className="block">
           <FieldLabel>
-            Optional title
+            Title
           </FieldLabel>
           <input
             value={title}
@@ -462,72 +462,79 @@ export function DreamArchivePanel({
         />
       </label>
 
-      <div className="mt-4">
-        <DreamAudioRecorder
-          onAudioUploaded={(
-            path,
-            previewUrl
-          ) => {
-            setAudioPath(path);
-            setAudioPreviewUrl(
+      <div className="mt-4 space-y-3">
+        <SignalDisclosure
+          title="dream.audio.recorder"
+          summary="Record and attach a spoken dream"
+        >
+          <ContextAudioRecorder
+            onAudioUploaded={(
+              path,
               previewUrl
-            );
-          }}
-        />
-      </div>
+            ) => {
+              setAudioPath(path);
+              setAudioPreviewUrl(
+                previewUrl
+              );
+            }}
+          />
 
-      {audioPath ? (
-        <div className="mt-3 border border-[#242424] bg-[#030303] p-3">
-          <p className="terminal-green text-xs">
-            &gt; Dream recording attached.
-          </p>
-          <p className="terminal-muted mt-1 break-all text-[10px]">
-            {audioPath}
-          </p>
-          {audioPreviewUrl ? (
-            <audio
-              controls
-              src={audioPreviewUrl}
-              className="mt-3 w-full"
-            />
+          {audioPath ? (
+            <div className="mt-3 border border-[#242424] bg-[#030303] p-3">
+              <p className="terminal-green text-xs">
+                &gt; Dream recording attached.
+              </p>
+              <p className="terminal-muted mt-1 break-all text-[10px]">
+                {audioPath}
+              </p>
+              {audioPreviewUrl ? (
+                <audio
+                  controls
+                  src={audioPreviewUrl}
+                  className="mt-3 w-full"
+                />
+              ) : null}
+            </div>
           ) : null}
-        </div>
-      ) : null}
+        </SignalDisclosure>
 
-      <div className="mt-4 border border-[#242424] bg-[#030303] p-3">
-        <p className="terminal-green mb-3 text-xs uppercase tracking-[0.18em]">
-          &gt; transcript
-        </p>
-        <label className="block">
-          <FieldLabel>
-            Raw transcript
-          </FieldLabel>
-          <textarea
-            value={rawTranscript}
-            onChange={(event) =>
-              setRawTranscript(
-                event.target.value
-              )
-            }
-            className={`${inputClassName} min-h-[110px] resize-y leading-6`}
-            placeholder="Speech-to-text or manual transcript..."
-          />
-        </label>
-        <label className="mt-3 block">
-          <FieldLabel>
-            Cleaned transcript
-          </FieldLabel>
-          <textarea
-            value={cleanedTranscript}
-            onChange={(event) =>
-              setCleanedTranscript(
-                event.target.value
-              )
-            }
-            className={`${inputClassName} min-h-[110px] resize-y leading-6`}
-            placeholder="Cleaned dream text..."
-          />
-        </label>
+        <SignalDisclosure
+          title="dream.transcript"
+          summary="Raw and cleaned dream transcript"
+        >
+          <div className="space-y-3">
+            <label className="block">
+              <FieldLabel>
+                Raw transcript
+              </FieldLabel>
+              <textarea
+                value={rawTranscript}
+                onChange={(event) =>
+                  setRawTranscript(
+                    event.target.value
+                  )
+                }
+                className={`${inputClassName} min-h-[110px] resize-y leading-6`}
+                placeholder="Speech-to-text or manual transcript..."
+              />
+            </label>
+            <label className="block">
+              <FieldLabel>
+                Cleaned transcript
+              </FieldLabel>
+              <textarea
+                value={cleanedTranscript}
+                onChange={(event) =>
+                  setCleanedTranscript(
+                    event.target.value
+                  )
+                }
+                className={`${inputClassName} min-h-[110px] resize-y leading-6`}
+                placeholder="Cleaned dream text..."
+              />
+            </label>
+          </div>
+        </SignalDisclosure>
       </div>
 
       <button

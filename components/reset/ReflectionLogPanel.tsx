@@ -5,7 +5,7 @@ import {
   useState,
   useTransition,
 } from "react";
-import { DreamAudioRecorder } from "@/components/reset/DreamAudioRecorder";
+import { ContextAudioRecorder } from "@/components/reset/ContextAudioRecorder";
 import { SignalDisclosure } from "@/components/reset/SignalDisclosure";
 import { createClient } from "@/utils/supabase/client";
 
@@ -329,50 +329,60 @@ export function ReflectionLogPanel({
         />
       </label>
 
-      <div className="mt-4">
-        <DreamAudioRecorder
-          onAudioUploaded={(
-            path,
-            previewUrl
-          ) => {
-            setAudioPath(path);
-            setAudioPreviewUrl(
+      <div className="mt-4 space-y-3">
+        <SignalDisclosure
+          title="reflection.audio.recorder"
+          summary="Record and attach a spoken reflection"
+        >
+          <ContextAudioRecorder
+            onAudioUploaded={(
+              path,
               previewUrl
-            );
-          }}
-        />
-      </div>
+            ) => {
+              setAudioPath(path);
+              setAudioPreviewUrl(
+                previewUrl
+              );
+            }}
+          />
 
-      {audioPath ? (
-        <div className="mt-3 border border-[#242424] bg-[#030303] p-3">
-          <p className="terminal-green text-xs">
-            &gt; Voice recording attached.
-          </p>
-          <p className="terminal-muted mt-1 break-all text-[10px]">
-            {audioPath}
-          </p>
-          {audioPreviewUrl ? (
-            <audio
-              controls
-              src={audioPreviewUrl}
-              className="mt-3 w-full"
-            />
+          {audioPath ? (
+            <div className="mt-3 border border-[#242424] bg-[#030303] p-3">
+              <p className="terminal-green text-xs">
+                &gt; Reflection recording attached.
+              </p>
+              <p className="terminal-muted mt-1 break-all text-[10px]">
+                {audioPath}
+              </p>
+              {audioPreviewUrl ? (
+                <audio
+                  controls
+                  src={audioPreviewUrl}
+                  className="mt-3 w-full"
+                />
+              ) : null}
+            </div>
           ) : null}
-        </div>
-      ) : null}
+        </SignalDisclosure>
 
-      <TranscriptFields
-        rawTranscript={rawTranscript}
-        cleanedTranscript={
-          cleanedTranscript
-        }
-        setRawTranscript={
-          setRawTranscript
-        }
-        setCleanedTranscript={
-          setCleanedTranscript
-        }
-      />
+        <SignalDisclosure
+          title="reflection.transcript"
+          summary="Raw and cleaned reflection transcript"
+        >
+          <TranscriptFields
+            rawTranscript={rawTranscript}
+            cleanedTranscript={
+              cleanedTranscript
+            }
+            setRawTranscript={
+              setRawTranscript
+            }
+            setCleanedTranscript={
+              setCleanedTranscript
+            }
+          />
+        </SignalDisclosure>
+      </div>
 
       <button
         type="button"
@@ -586,10 +596,7 @@ function TranscriptFields({
   ) => void;
 }) {
   return (
-    <div className="mt-4 border border-[#242424] bg-[#030303] p-3">
-      <p className="terminal-green mb-3 text-xs uppercase tracking-[0.18em]">
-        &gt; transcript
-      </p>
+    <div className="space-y-3">
       <label className="block">
         <FieldLabel>Raw transcript</FieldLabel>
         <textarea
