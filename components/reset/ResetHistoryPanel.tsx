@@ -10,6 +10,8 @@ export type ResetScoreLog = {
   total_protocols: number;
   system_status: string;
   consistency_signal: string;
+  is_locked: boolean;
+  locked_at: string | null;
   created_at: string;
 };
 
@@ -64,7 +66,7 @@ export function ResetHistoryPanel({
 
         <div className="mt-4 max-h-[420px] overflow-auto border border-[#242424]">
           <div className="min-w-[920px]">
-            <div className="terminal-muted grid grid-cols-[105px_80px_repeat(4,105px)_120px_1fr] gap-3 border-b border-[#242424] bg-[#080808] px-3 py-2 text-[10px] uppercase tracking-[0.12em]">
+            <div className="terminal-muted grid grid-cols-[105px_80px_repeat(4,105px)_120px_110px_1fr] gap-3 border-b border-[#242424] bg-[#080808] px-3 py-2 text-[10px] uppercase tracking-[0.12em]">
               <span>Date</span>
               <span>Reset</span>
               <span>Morning</span>
@@ -72,6 +74,7 @@ export function ResetHistoryPanel({
               <span>Night</span>
               <span>Sleep</span>
               <span>Complete</span>
+              <span>State</span>
               <span>Signal</span>
             </div>
 
@@ -79,7 +82,7 @@ export function ResetHistoryPanel({
               sortedScores.map((score, index) => (
                 <div
                   key={`${score.id}-${score.date}-${index}`}
-                  className="terminal-line grid grid-cols-[105px_80px_repeat(4,105px)_120px_1fr] gap-3 px-3 py-3 text-xs"
+                  className="terminal-line grid grid-cols-[105px_80px_repeat(4,105px)_120px_110px_1fr] gap-3 px-3 py-3 text-xs"
                 >
                   <span className="terminal-muted">
                     {score.date}
@@ -92,6 +95,20 @@ export function ResetHistoryPanel({
                   <span className="text-[#e5e5e5]">
                     {score.completed_protocols} /{" "}
                     {score.total_protocols}
+                  </span>
+                  <span
+                    className={
+                      score.is_locked
+                        ? "terminal-green uppercase"
+                        : "terminal-muted uppercase"
+                    }
+                    title={
+                      score.locked_at
+                        ? `Locked ${score.locked_at}`
+                        : undefined
+                    }
+                  >
+                    {score.is_locked ? "FINAL" : "EDITABLE"}
                   </span>
                   <span className="terminal-muted uppercase">
                     {score.consistency_signal}

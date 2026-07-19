@@ -24,6 +24,7 @@ import { ResetHistoryPanel } from "@/components/reset/ResetHistoryPanel";
 import { ResetStreakPanel } from "@/components/reset/ResetStreakPanel";
 import { RoutineTrendPanel } from "@/components/reset/RoutineTrendPanel";
 import { ShadowConsolePanel } from "@/components/reset/ShadowConsolePanel";
+import { SignalDisclosure } from "@/components/reset/SignalDisclosure";
 import { WeeklyResetPanel } from "@/components/reset/WeeklyResetPanel";
 import { calculateResetStreak } from "@/utils/reset-streak";
 import { createClient } from "@/utils/supabase/server";
@@ -355,20 +356,6 @@ export default async function Home() {
     (reflection) => reflection.reflection_type === "dream"
   );
 
-  const journalReflections = (
-    aiReflections ?? []
-  ).filter(
-    (reflection) =>
-      reflection.reflection_type === "journal"
-  );
-
-  const shadowReflections = (
-    aiReflections ?? []
-  ).filter(
-    (reflection) =>
-      reflection.reflection_type === "shadow"
-  );
-
   const totalProtocols = habits?.length ?? 0;
 
   const todayReset =
@@ -477,7 +464,7 @@ export default async function Home() {
                 <ModuleAccordion
                   id="reflection-log"
                   title="reflection.log"
-                  subtitle="Daily reflection and freewrite"
+                  subtitle="Written, recorded, and transcribed reflection"
                 >
                   <ReflectionLogPanel
                     initialEntries={(journalEntries ?? [])
@@ -499,39 +486,22 @@ export default async function Home() {
                         mood: entry.mood,
                         energy: entry.energy,
                         tags: entry.tags,
-                        created_at: entry.created_at,
-                      }))}
-                    initialReflections={journalReflections.map(
-                      (reflection) => ({
-                        id: reflection.id,
-                        journal_entry_id:
-                          reflection.journal_entry_id,
-                        reflection_type:
-                          reflection.reflection_type as
-                            | "journal"
-                            | "shadow"
-                            | "dream"
-                            | "daily_review",
-                        summary: reflection.summary,
-                        pattern_noticed:
-                          reflection.pattern_noticed,
-                        compassionate_reframe:
-                          reflection.compassionate_reframe,
-                        questions: reflection.questions,
-                        action_step:
-                          reflection.action_step,
-                        model: reflection.model,
+                        audio_path:
+                          entry.audio_path,
+                        raw_transcript:
+                          entry.raw_transcript,
+                        cleaned_transcript:
+                          entry.cleaned_transcript,
                         created_at:
-                          reflection.created_at,
-                      })
-                    )}
+                          entry.created_at,
+                      }))}
                   />
                 </ModuleAccordion>
 
                 <ModuleAccordion
                   id="shadow-console"
                   title="shadow.console"
-                  subtitle="One deep prompt per day"
+                  subtitle="One deep prompt with writing, voice, and transcript"
                 >
                   <ShadowConsolePanel
                     initialEntries={shadowEntries.map(
@@ -543,31 +513,14 @@ export default async function Home() {
                         mood: entry.mood,
                         energy: entry.energy,
                         tags: entry.tags,
-                        created_at: entry.created_at,
-                      })
-                    )}
-                    initialReflections={shadowReflections.map(
-                      (reflection) => ({
-                        id: reflection.id,
-                        journal_entry_id:
-                          reflection.journal_entry_id,
-                        reflection_type:
-                          reflection.reflection_type as
-                            | "journal"
-                            | "shadow"
-                            | "dream"
-                            | "daily_review",
-                        summary: reflection.summary,
-                        pattern_noticed:
-                          reflection.pattern_noticed,
-                        compassionate_reframe:
-                          reflection.compassionate_reframe,
-                        questions: reflection.questions,
-                        action_step:
-                          reflection.action_step,
-                        model: reflection.model,
+                        audio_path:
+                          entry.audio_path,
+                        raw_transcript:
+                          entry.raw_transcript,
+                        cleaned_transcript:
+                          entry.cleaned_transcript,
                         created_at:
-                          reflection.created_at,
+                          entry.created_at,
                       })
                     )}
                   />
@@ -631,8 +584,8 @@ export default async function Home() {
 
                 <ModuleAccordion
                   id="ai-reflection"
-                  title="ai.reflection.engine"
-                  subtitle="Mock AI reflection engine"
+                  title="ai.reflection.workspace"
+                  subtitle="Guided pattern review and grounded actions"
                 >
                   <AIReflectionPanel
                     entries={(journalEntries ?? []).map(
@@ -755,61 +708,92 @@ export default async function Home() {
                     title="reset.analytics"
                     subtitle={`${streakStats.currentStreak}-day current streak · ${streakStats.bestStreak}-day best · ${streakStats.savedLast7}/7 saved recently`}
                   >
-                    <div className="space-y-4">
-                      <ResetStreakPanel
-                        stats={streakStats}
-                      />
+                    <div className="space-y-3">
+                      <SignalDisclosure
+                        title="reset.streak"
+                        summary="Current and best consistency streaks"
+                      >
+                        <ResetStreakPanel
+                          stats={streakStats}
+                        />
+                      </SignalDisclosure>
 
-                      <WeeklyResetPanel />
+                      <SignalDisclosure
+                        title="weekly.reset.report"
+                        summary="Seven-day system review"
+                      >
+                        <WeeklyResetPanel />
+                      </SignalDisclosure>
 
-                      <ResetCalendarPanel />
+                      <SignalDisclosure
+                        title="reset.calendar"
+                        summary="Saved-day calendar and score signals"
+                      >
+                        <ResetCalendarPanel />
+                      </SignalDisclosure>
 
-                      <RoutineTrendPanel />
+                      <SignalDisclosure
+                        title="routine.trend.analyzer"
+                        summary="Thirty-day routine movement"
+                      >
+                        <RoutineTrendPanel />
+                      </SignalDisclosure>
 
-                      <ProtocolReliabilityPanel />
+                      <SignalDisclosure
+                        title="protocol.reliability"
+                        summary="Protocol completion reliability"
+                      >
+                        <ProtocolReliabilityPanel />
+                      </SignalDisclosure>
 
-                      <ResetHistoryPanel
-                        initialScores={(
-                          resetScores ?? []
-                        ).map((score) => ({
-                          id: score.id,
-                          date: score.date,
-                          morning_score: Number(
-                            score.morning_score ?? 0
-                          ),
-                          daily_score: Number(
-                            score.daily_score ?? 0
-                          ),
-                          night_score: Number(
-                            score.night_score ?? 0
-                          ),
-                          trust_score: Number(
-                            score.trust_score ?? 0
-                          ),
-                          reset_score: Number(
-                            score.reset_score ?? 0
-                          ),
-                          completed_protocols: Number(
-                            score.completed_protocols ?? 0
-                          ),
-                          total_protocols: Number(
-                            score.total_protocols ?? 0
-                          ),
-                          system_status:
-                            score.system_status ??
-                            "NO STATUS",
-                          consistency_signal:
-                            score.consistency_signal ??
-                            "NO SIGNAL",
-                          is_locked: Boolean(
-                            score.is_locked
-                          ),
-                          locked_at:
-                            score.locked_at ?? null,
-                          created_at:
-                            score.created_at,
-                        }))}
-                      />
+                      <SignalDisclosure
+                        title="reset.history"
+                        summary="Saved reset score history"
+                        count={(resetScores ?? []).length}
+                      >
+                        <ResetHistoryPanel
+                          initialScores={(
+                            resetScores ?? []
+                          ).map((score) => ({
+                            id: score.id,
+                            date: score.date,
+                            morning_score: Number(
+                              score.morning_score ?? 0
+                            ),
+                            daily_score: Number(
+                              score.daily_score ?? 0
+                            ),
+                            night_score: Number(
+                              score.night_score ?? 0
+                            ),
+                            trust_score: Number(
+                              score.trust_score ?? 0
+                            ),
+                            reset_score: Number(
+                              score.reset_score ?? 0
+                            ),
+                            completed_protocols: Number(
+                              score.completed_protocols ?? 0
+                            ),
+                            total_protocols: Number(
+                              score.total_protocols ?? 0
+                            ),
+                            system_status:
+                              score.system_status ??
+                              "NO STATUS",
+                            consistency_signal:
+                              score.consistency_signal ??
+                              "NO SIGNAL",
+                            is_locked: Boolean(
+                              score.is_locked
+                            ),
+                            locked_at:
+                              score.locked_at ?? null,
+                            created_at:
+                              score.created_at,
+                          }))}
+                        />
+                      </SignalDisclosure>
                     </div>
                   </ModuleAccordion>
                 </div>

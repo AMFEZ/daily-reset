@@ -1,9 +1,17 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import {
+  useMemo,
+  useState,
+  useTransition,
+} from "react";
+import { DreamAudioRecorder } from "@/components/reset/DreamAudioRecorder";
+import { SignalDisclosure } from "@/components/reset/SignalDisclosure";
 import { createClient } from "@/utils/supabase/client";
 
-type EntryType = "reflection" | "freewrite";
+type EntryType =
+  | "reflection"
+  | "freewrite";
 
 type JournalEntry = {
   id: string;
@@ -13,6 +21,9 @@ type JournalEntry = {
   mood: string | null;
   energy: number | null;
   tags: string[] | null;
+  audio_path: string | null;
+  raw_transcript: string | null;
+  cleaned_transcript: string | null;
   created_at: string;
 };
 
@@ -27,159 +38,111 @@ type SavedJournalEntryRow = {
   log_created_at: string;
 };
 
-type AIReflection = {
-  id: string;
-  journal_entry_id: string;
-  reflection_type: "journal" | "shadow" | "dream" | "daily_review";
-  summary: string | null;
-  pattern_noticed: string | null;
-  compassionate_reframe: string | null;
-  questions: string[] | null;
-  action_step: string | null;
-  model: string | null;
-  created_at: string;
-};
-
-type ReflectEntryResponse = {
-  reflection?: AIReflection;
+type TranscriptionResponse = {
+  rawTranscript?: string;
+  cleanedTranscript?: string;
   error?: string;
 };
 
 type ReflectionLogPanelProps = {
   initialEntries: JournalEntry[];
-  initialReflections: AIReflection[];
 };
-
-const entryTypeLabels: Record<EntryType, string> = {
-  reflection: "Daily Reflection",
-  freewrite: "Freewrite",
-};
-
-const promptsByEntryType: Record<EntryType, string[]> = {
-  reflection: [
-    "What happened today that mattered?",
-    "Where did I act like the person I am becoming?",
-    "Where did the old pattern take control?",
-    "What is one correction I can make tomorrow?",
-  ],
-  freewrite: [
-    "What is taking up the most space in my mind?",
-    "What am I avoiding saying clearly?",
-    "What do I need to let move through me?",
-    "Write without editing until the signal changes.",
-  ],
-};
-
-function parseTags(value: string) {
-  return value
-    .split(",")
-    .map((tag) => tag.trim())
-    .filter(Boolean);
-}
 
 export function ReflectionLogPanel({
   initialEntries,
-  initialReflections,
 }: ReflectionLogPanelProps) {
   const supabase = createClient();
-  const [isPending, startTransition] = useTransition();
-
+  const [isPending, startTransition] =
+    useTransition();
   const [entries, setEntries] =
     useState<JournalEntry[]>(initialEntries);
-  const [reflections, setReflections] =
-    useState<AIReflection[]>(initialReflections);
-
   const [entryType, setEntryType] =
     useState<EntryType>("reflection");
-  const [title, setTitle] = useState("");
-  const [content, setContent] = useState("");
   const [mood, setMood] = useState("");
-  const [energy, setEnergy] = useState("5");
-  const [tags, setTags] = useState("");
+  const [content, setContent] =
+    useState("");
+  const [audioPath, setAudioPath] =
+    useState<string | null>(null);
+  const [
+    audioPreviewUrl,
+    setAudioPreviewUrl,
+  ] = useState<string | null>(null);
+  const [
+    rawTranscript,
+    setRawTranscript,
+  ] = useState("");
+  const [
+    cleanedTranscript,
+    setCleanedTranscript,
+  ] = useState("");
+  const [
+    transcribingEntryId,
+    setTranscribingEntryId,
+  ] = useState<string | null>(null);
   const [message, setMessage] =
     useState<string | null>(null);
-  const [reflectingEntryId, setReflectingEntryId] =
-    useState<string | null>(null);
 
-  const sortedEntries = useMemo(() => {
-    return [...entries].sort((a, b) =>
-      b.created_at.localeCompare(a.created_at)
-    );
-  }, [entries]);
-
-  const reflectionsByEntryId = useMemo(() => {
-    return reflections.reduce<Record<string, AIReflection>>(
-      (accumulator, reflection) => {
-        if (!accumulator[reflection.journal_entry_id]) {
-          accumulator[reflection.journal_entry_id] =
-            reflection;
-        }
-
-        return accumulator;
-      },
-      {}
-    );
-  }, [reflections]);
-
-  const activePrompts = promptsByEntryType[entryType];
-
-  function usePrompt(prompt: string) {
-    setContent((current) => {
-      const cleanCurrent = current.trimEnd();
-
-      if (!cleanCurrent) {
-        return `${prompt}\n\n`;
-      }
-
-      return `${cleanCurrent}\n\n${prompt}\n\n`;
-    });
-  }
+  const sortedEntries = useMemo(
+    () =>
+      [...entries].sort((a, b) =>
+        b.created_at.localeCompare(
+          a.created_at
+        )
+      ),
+    [entries]
+  );
 
   function saveEntry() {
     const cleanContent = content.trim();
-    const parsedEnergy = Number(energy);
-
-    if (cleanContent.length < 2) {
-      setMessage("Write at least one real signal.");
-      return;
-    }
+    const cleanRaw =
+      rawTranscript.trim();
+    const cleanCleaned =
+      cleanedTranscript.trim();
 
     if (
-      energy &&
-      (Number.isNaN(parsedEnergy) ||
-        parsedEnergy < 1 ||
-        parsedEnergy > 10)
+      cleanContent.length < 2 &&
+      cleanRaw.length < 2 &&
+      cleanCleaned.length < 2 &&
+      !audioPath
     ) {
-      setMessage("Energy must be between 1 and 10.");
+      setMessage(
+        "Write, record, or transcribe at least one reflection signal."
+      );
       return;
     }
+
+    const storedContent =
+      cleanContent ||
+      cleanCleaned ||
+      cleanRaw ||
+      "Audio reflection signal.";
 
     setMessage(null);
 
     startTransition(async () => {
-      const { data: rawData, error } = await supabase
-        .rpc("add_journal_entry", {
-          target_entry_type: entryType,
-          target_title: title.trim() || null,
-          target_content: cleanContent,
-          target_mood: mood.trim() || null,
-          target_energy: energy ? parsedEnergy : null,
-          target_tags: parseTags(tags),
-        })
-        .single();
+      const { data: rawData, error } =
+        await supabase
+          .rpc("add_journal_entry", {
+            target_entry_type: entryType,
+            target_title: null,
+            target_content: storedContent,
+            target_mood:
+              mood.trim() || null,
+            target_energy: null,
+            target_tags: [],
+          })
+          .single();
 
       if (error) {
-        console.error(
-          "Reflection save failed:",
-          error.message
+        setMessage(
+          `Save failed: ${error.message}`
         );
-        setMessage(`Save failed: ${error.message}`);
         return;
       }
 
       if (!rawData) {
         setMessage(
-          "Reflection saved, but no saved record was returned."
+          "Reflection saved, but no record was returned."
         );
         return;
       }
@@ -187,442 +150,525 @@ export function ReflectionLogPanel({
       const data =
         rawData as unknown as SavedJournalEntryRow;
 
+      const attachmentResult =
+        await attachJournalMedia({
+          journalEntryId: data.log_id,
+          audioPath,
+          rawTranscript:
+            cleanRaw || null,
+          cleanedTranscript:
+            cleanCleaned || null,
+        });
+
+      if (!attachmentResult.ok) {
+        setMessage(
+          `Reflection saved, but audio/transcript linking failed: ${attachmentResult.error}`
+        );
+      } else {
+        setMessage(
+          "Reflection signal saved."
+        );
+      }
+
       const savedEntry: JournalEntry = {
         id: data.log_id,
-        entry_type: data.log_entry_type,
-        title: data.log_title,
+        entry_type:
+          data.log_entry_type,
+        title: null,
         content: data.log_content,
         mood: data.log_mood,
-        energy: data.log_energy,
-        tags: data.log_tags,
-        created_at: data.log_created_at,
+        energy: null,
+        tags: [],
+        audio_path: audioPath,
+        raw_transcript:
+          cleanRaw || null,
+        cleaned_transcript:
+          cleanCleaned || null,
+        created_at:
+          data.log_created_at,
       };
 
       setEntries((current) => [
         savedEntry,
         ...current,
       ]);
-
-      setTitle("");
       setContent("");
       setMood("");
-      setEnergy("5");
-      setTags("");
-      setMessage("Reflection signal saved.");
+      setAudioPath(null);
+      setAudioPreviewUrl(null);
+      setRawTranscript("");
+      setCleanedTranscript("");
     });
   }
 
-  async function reflectEntry(entry: JournalEntry) {
+  async function transcribeEntry(
+    entry: JournalEntry
+  ) {
+    if (!entry.audio_path) {
+      setMessage(
+        "No audio is attached to this reflection."
+      );
+      return;
+    }
+
     setMessage(null);
-    setReflectingEntryId(entry.id);
+    setTranscribingEntryId(entry.id);
 
     try {
-      const response = await fetch("/api/reflect-entry", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          journalEntryId: entry.id,
-        }),
-      });
+      const response = await fetch(
+        "/api/transcribe-dream",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            journalEntryId: entry.id,
+            audioPath: entry.audio_path,
+          }),
+        }
+      );
 
       const result =
-        (await response.json()) as ReflectEntryResponse;
+        (await response.json()) as TranscriptionResponse;
 
-      if (!response.ok) {
-        setMessage(
-          result.error ?? "AI reflection failed."
+      if (
+        !response.ok ||
+        typeof result.rawTranscript !==
+          "string" ||
+        typeof result.cleanedTranscript !==
+          "string"
+      ) {
+        throw new Error(
+          result.error ??
+            "No transcript was returned."
         );
-        return;
       }
 
-      if (!result.reflection) {
-        setMessage(
-          "AI reflection completed, but no result was returned."
-        );
-        return;
-      }
+      setEntries((current) =>
+        current.map((candidate) =>
+          candidate.id === entry.id
+            ? {
+                ...candidate,
+                raw_transcript:
+                  result.rawTranscript ??
+                  null,
+                cleaned_transcript:
+                  result.cleanedTranscript ??
+                  null,
+              }
+            : candidate
+        )
+      );
 
-      setReflections((current) => [
-        result.reflection as AIReflection,
-        ...current.filter(
-          (reflection) =>
-            reflection.journal_entry_id !== entry.id
-        ),
-      ]);
-
-      setMessage("AI reflection generated.");
+      setMessage(
+        "Reflection audio transcribed."
+      );
     } catch (error) {
-      console.error("AI reflection failed:", error);
-      setMessage("AI reflection failed.");
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Transcription failed."
+      );
     } finally {
-      setReflectingEntryId(null);
+      setTranscribingEntryId(null);
     }
   }
 
   return (
     <TerminalBlock title="reflection.log">
-      <div className="grid gap-4 lg:grid-cols-[1fr_0.85fr]">
-        <div>
-          <p className="terminal-muted mb-3 text-xs leading-6">
-            &gt; Write the signal. No performance. No perfect
-            wording. Pattern recognition begins with honest logs.
-          </p>
+      <p className="terminal-muted mb-3 text-xs leading-6">
+        &gt; Write or speak the signal. Reflection
+        capture stays separate from AI interpretation.
+      </p>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="block">
-              <span className="terminal-muted text-[11px] uppercase tracking-[0.18em]">
-                Entry type
-              </span>
-
-              <select
-                value={entryType}
-                onChange={(event) => {
-                  setEntryType(
-                    event.target.value as EntryType
-                  );
-                  setMessage(null);
-                }}
-                className="mt-2 w-full border border-[#242424] bg-[#050505] px-3 py-3 text-sm text-[#e5e5e5] outline-none focus:border-[#39ff88]"
-              >
-                <option value="reflection">
-                  daily reflection
-                </option>
-                <option value="freewrite">
-                  freewrite
-                </option>
-              </select>
-            </label>
-
-            <label className="block">
-              <span className="terminal-muted text-[11px] uppercase tracking-[0.18em]">
-                Optional title
-              </span>
-
-              <input
-                value={title}
-                onChange={(event) =>
-                  setTitle(event.target.value)
-                }
-                className="mt-2 w-full border border-[#242424] bg-[#050505] px-3 py-3 text-sm text-[#e5e5e5] outline-none focus:border-[#39ff88]"
-                placeholder="Today felt like..."
-              />
-            </label>
-          </div>
-
-          <div className="mt-3 grid gap-3 md:grid-cols-[1fr_110px_1fr]">
-            <label className="block">
-              <span className="terminal-muted text-[11px] uppercase tracking-[0.18em]">
-                Mood
-              </span>
-
-              <input
-                value={mood}
-                onChange={(event) =>
-                  setMood(event.target.value)
-                }
-                className="mt-2 w-full border border-[#242424] bg-[#050505] px-3 py-3 text-sm text-[#e5e5e5] outline-none focus:border-[#39ff88]"
-                placeholder="calm, heavy, focused..."
-              />
-            </label>
-
-            <label className="block">
-              <span className="terminal-muted text-[11px] uppercase tracking-[0.18em]">
-                Energy
-              </span>
-
-              <input
-                value={energy}
-                onChange={(event) =>
-                  setEnergy(event.target.value)
-                }
-                inputMode="numeric"
-                className="mt-2 w-full border border-[#242424] bg-[#050505] px-3 py-3 text-sm text-[#e5e5e5] outline-none focus:border-[#39ff88]"
-                placeholder="1-10"
-              />
-            </label>
-
-            <label className="block">
-              <span className="terminal-muted text-[11px] uppercase tracking-[0.18em]">
-                Tags
-              </span>
-
-              <input
-                value={tags}
-                onChange={(event) =>
-                  setTags(event.target.value)
-                }
-                className="mt-2 w-full border border-[#242424] bg-[#050505] px-3 py-3 text-sm text-[#e5e5e5] outline-none focus:border-[#39ff88]"
-                placeholder="work, body, dream..."
-              />
-            </label>
-          </div>
-
-          <label className="mt-3 block">
-            <span className="terminal-muted text-[11px] uppercase tracking-[0.18em]">
-              Log content
-            </span>
-
-            <textarea
-              value={content}
-              onChange={(event) =>
-                setContent(event.target.value)
-              }
-              className="mt-2 min-h-[260px] w-full resize-y border border-[#242424] bg-[#050505] px-3 py-3 text-sm leading-6 text-[#e5e5e5] outline-none focus:border-[#39ff88]"
-              placeholder="Type the signal..."
-            />
-          </label>
-
-          <button
-            type="button"
-            onClick={saveEntry}
-            disabled={isPending}
-            className="mt-4 min-h-[48px] w-full border border-[#39ff88] bg-[#050505] px-4 py-3 text-left text-sm text-[#39ff88] transition hover:bg-[#0d0d0d] disabled:cursor-not-allowed disabled:opacity-60"
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block">
+          <FieldLabel>Entry type</FieldLabel>
+          <select
+            value={entryType}
+            onChange={(event) =>
+              setEntryType(
+                event.target.value as EntryType
+              )
+            }
+            className={inputClassName}
           >
-            &gt;{" "}
-            {isPending
-              ? "saving reflection..."
-              : "save reflection_log"}
-          </button>
+            <option value="reflection">
+              daily reflection
+            </option>
+            <option value="freewrite">
+              freewrite
+            </option>
+          </select>
+        </label>
 
-          {message ? (
-            <p className="mt-3 text-xs text-[#ffb020]">
-              &gt; {message}
-            </p>
-          ) : null}
-        </div>
-
-        <div className="space-y-4">
-          <div className="border border-[#242424] bg-[#080808] p-3">
-            <p className="terminal-green mb-3 text-xs uppercase tracking-[0.2em]">
-              &gt; prompt.signals
-            </p>
-
-            <div className="space-y-2">
-              {activePrompts.map((prompt, index) => (
-                <button
-                  type="button"
-                  key={`${entryType}-${index}`}
-                  onClick={() => usePrompt(prompt)}
-                  className="block w-full border border-[#242424] bg-[#050505] px-3 py-2 text-left text-xs leading-5 text-[#e5e5e5] transition hover:border-[#39ff88] hover:text-[#39ff88]"
-                >
-                  &gt; {prompt}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="border border-[#242424] bg-[#080808] p-3">
-            <TerminalRow
-              label="ENTRIES"
-              value={String(entries.length)}
-              green={entries.length > 0}
-            />
-
-            <TerminalRow
-              label="ACTIVE TYPE"
-              value={entryTypeLabels[entryType]}
-            />
-
-            <TerminalRow
-              label="AI REFLECTION"
-              value="ONLINE"
-              green
-            />
-
-            <p className="terminal-muted mt-4 text-xs leading-6">
-              &gt; Save the raw entry first. AI reflection can
-              then surface patterns, reframes, and one grounded
-              action.
-            </p>
-          </div>
-        </div>
+        <label className="block">
+          <FieldLabel>Mood</FieldLabel>
+          <input
+            value={mood}
+            onChange={(event) =>
+              setMood(event.target.value)
+            }
+            placeholder="calm, heavy, focused..."
+            className={inputClassName}
+          />
+        </label>
       </div>
 
-      <div className="mt-5">
-        <p className="terminal-green mb-2 text-xs uppercase tracking-[0.2em]">
-          &gt; recent.reflection.signals
-        </p>
+      <label className="mt-3 block">
+        <FieldLabel>Reflection</FieldLabel>
+        <textarea
+          value={content}
+          onChange={(event) =>
+            setContent(event.target.value)
+          }
+          placeholder="Type the signal..."
+          className={`${inputClassName} min-h-[220px] resize-y leading-6`}
+        />
+      </label>
 
-        <div className="max-h-[520px] overflow-y-auto border border-[#242424]">
-          {sortedEntries.length > 0 ? (
-            sortedEntries
-              .slice(0, 10)
-              .map((entry, index) => {
-                const created = new Date(
-                  entry.created_at
-                );
-                const reflection =
-                  reflectionsByEntryId[entry.id];
+      <div className="mt-4">
+        <DreamAudioRecorder
+          onAudioUploaded={(
+            path,
+            previewUrl
+          ) => {
+            setAudioPath(path);
+            setAudioPreviewUrl(
+              previewUrl
+            );
+          }}
+        />
+      </div>
 
-                return (
-                  <div
-                    key={`${entry.id ?? "journal-entry"}-${entry.created_at}-${index}`}
-                    className="terminal-line p-3 text-xs"
-                  >
-                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <span className="terminal-green">
-                          {entry.title ||
-                            entryTypeLabels[
-                              entry.entry_type
-                            ]}
-                        </span>
-
-                        <span className="terminal-muted">
-                          {" "}
-                          /{" "}
-                          {
-                            entryTypeLabels[
-                              entry.entry_type
-                            ]
-                          }
-                        </span>
-                      </div>
-
-                      <span className="terminal-muted">
-                        {created.toLocaleDateString()}{" "}
-                        {created.toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </span>
-                    </div>
-
-                    <p className="whitespace-pre-wrap leading-6 text-[#e5e5e5]">
-                      {entry.content}
-                    </p>
-
-                    <div className="terminal-muted mt-2 flex flex-wrap gap-3">
-                      {entry.mood ? (
-                        <span>mood: {entry.mood}</span>
-                      ) : null}
-
-                      {entry.energy ? (
-                        <span>
-                          energy: {entry.energy}/10
-                        </span>
-                      ) : null}
-
-                      {entry.tags &&
-                      entry.tags.length > 0 ? (
-                        <span>
-                          tags: {entry.tags.join(", ")}
-                        </span>
-                      ) : null}
-                    </div>
-
-                    <div className="mt-3">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          reflectEntry(entry)
-                        }
-                        disabled={
-                          reflectingEntryId === entry.id
-                        }
-                        className="min-h-[48px] w-full whitespace-normal break-words border border-[#39ff88] bg-[#000000] px-4 py-2 text-left text-xs leading-5 text-[#39ff88] transition hover:bg-[#050505] disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        &gt;{" "}
-                        {reflectingEntryId === entry.id
-                          ? "generating_ai_reflection..."
-                          : reflection
-                            ? "regenerate_ai_reflection"
-                            : "generate_ai_reflection"}
-                      </button>
-                    </div>
-
-                    {reflection ? (
-                      <IntegratedReflectionView
-                        reflection={reflection}
-                      />
-                    ) : null}
-                  </div>
-                );
-              })
-          ) : (
-            <p className="terminal-muted p-3 text-xs">
-              &gt; No reflection signals logged yet.
-            </p>
-          )}
+      {audioPath ? (
+        <div className="mt-3 border border-[#242424] bg-[#030303] p-3">
+          <p className="terminal-green text-xs">
+            &gt; Voice recording attached.
+          </p>
+          <p className="terminal-muted mt-1 break-all text-[10px]">
+            {audioPath}
+          </p>
+          {audioPreviewUrl ? (
+            <audio
+              controls
+              src={audioPreviewUrl}
+              className="mt-3 w-full"
+            />
+          ) : null}
         </div>
+      ) : null}
+
+      <TranscriptFields
+        rawTranscript={rawTranscript}
+        cleanedTranscript={
+          cleanedTranscript
+        }
+        setRawTranscript={
+          setRawTranscript
+        }
+        setCleanedTranscript={
+          setCleanedTranscript
+        }
+      />
+
+      <button
+        type="button"
+        onClick={saveEntry}
+        disabled={isPending}
+        className="mt-4 min-h-[50px] w-full border border-[#39ff88] bg-[#050505] px-4 py-3 text-left text-sm text-[#39ff88] transition hover:bg-[#0d0d0d] disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        &gt;{" "}
+        {isPending
+          ? "saving reflection..."
+          : "save reflection_log"}
+      </button>
+
+      {message ? (
+        <p className="mt-3 text-xs text-[#ffb020]">
+          &gt; {message}
+        </p>
+      ) : null}
+
+      <div className="mt-5">
+        <SignalDisclosure
+          title="recent.reflection.signals"
+          count={sortedEntries.length}
+          summary="Written, recorded, and transcribed reflections"
+        >
+          <div className="max-h-[560px] overflow-y-auto border border-[#242424]">
+            {sortedEntries.length > 0 ? (
+              sortedEntries.map(
+                (entry, index) => (
+                  <JournalHistoryEntry
+                    key={`${entry.id}-${entry.created_at}-${index}`}
+                    entry={entry}
+                    transcribing={
+                      transcribingEntryId ===
+                      entry.id
+                    }
+                    onTranscribe={() =>
+                      transcribeEntry(entry)
+                    }
+                  />
+                )
+              )
+            ) : (
+              <p className="terminal-muted p-3 text-xs">
+                &gt; No reflection signals saved yet.
+              </p>
+            )}
+          </div>
+        </SignalDisclosure>
       </div>
     </TerminalBlock>
   );
 }
 
-function IntegratedReflectionView({
-  reflection,
+async function attachJournalMedia({
+  journalEntryId,
+  audioPath,
+  rawTranscript,
+  cleanedTranscript,
 }: {
-  reflection: AIReflection;
+  journalEntryId: string;
+  audioPath: string | null;
+  rawTranscript: string | null;
+  cleanedTranscript: string | null;
+}): Promise<
+  | { ok: true }
+  | { ok: false; error: string }
+> {
+  if (
+    !audioPath &&
+    !rawTranscript &&
+    !cleanedTranscript
+  ) {
+    return { ok: true };
+  }
+
+  try {
+    const response = await fetch(
+      "/api/journal-audio",
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        credentials: "same-origin",
+        cache: "no-store",
+        body: JSON.stringify({
+          journalEntryId,
+          audioPath,
+          rawTranscript,
+          cleanedTranscript,
+        }),
+      }
+    );
+
+    const payload =
+      (await response
+        .json()
+        .catch(() => null)) as
+        | { error?: string }
+        | null;
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        error:
+          payload?.error ??
+          "Attachment update failed.",
+      };
+    }
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Attachment update failed.",
+    };
+  }
+}
+
+function JournalHistoryEntry({
+  entry,
+  transcribing,
+  onTranscribe,
+}: {
+  entry: JournalEntry;
+  transcribing: boolean;
+  onTranscribe: () => void;
 }) {
+  const created = new Date(
+    entry.created_at
+  );
+
   return (
-    <div className="mt-3 border border-[#39ff88] bg-[#000000] p-3 text-xs leading-6">
-      <p className="terminal-green mb-3 uppercase tracking-[0.2em]">
-        &gt; ai.reflection
+    <article className="terminal-line p-3 text-xs">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <span className="terminal-green">
+          {entry.entry_type ===
+          "freewrite"
+            ? "Freewrite"
+            : "Daily Reflection"}
+        </span>
+        <span className="terminal-muted">
+          {created.toLocaleDateString()}{" "}
+          {created.toLocaleTimeString(
+            [],
+            {
+              hour: "2-digit",
+              minute: "2-digit",
+            }
+          )}
+        </span>
+      </div>
+
+      <p className="whitespace-pre-wrap leading-6 text-[#e5e5e5]">
+        {entry.content}
       </p>
 
-      <ReflectionSection
-        title="SUMMARY"
-        content={reflection.summary}
-      />
+      {entry.mood ? (
+        <p className="terminal-muted mt-2">
+          mood: {entry.mood}
+        </p>
+      ) : null}
 
-      <ReflectionSection
-        title="PATTERN NOTICED"
-        content={reflection.pattern_noticed}
-      />
-
-      <ReflectionSection
-        title="COMPASSIONATE REFRAME"
-        content={reflection.compassionate_reframe}
-      />
-
-      {reflection.questions &&
-      reflection.questions.length > 0 ? (
-        <div className="mt-3">
-          <p className="terminal-green">
-            QUESTIONS TO SIT WITH:
+      {entry.audio_path ? (
+        <div className="mt-3 border border-[#242424] bg-[#030303] p-3">
+          <p className="terminal-green break-all">
+            audio: {entry.audio_path}
           </p>
-
-          <ul className="terminal-muted mt-1 space-y-1">
-            {reflection.questions.map(
-              (question, index) => (
-                <li key={`${question}-${index}`}>
-                  &gt; {question}
-                </li>
-              )
-            )}
-          </ul>
+          <button
+            type="button"
+            onClick={onTranscribe}
+            disabled={transcribing}
+            className="mt-3 min-h-[46px] w-full border border-[#39ff88] bg-[#000000] px-3 py-2 text-left text-[#39ff88] disabled:opacity-50"
+          >
+            &gt;{" "}
+            {transcribing
+              ? "transcribing_reflection..."
+              : "speech_to_text"}
+          </button>
         </div>
       ) : null}
 
-      <ReflectionSection
-        title="ONE ACTION FOR TOMORROW"
-        content={reflection.action_step}
+      <TranscriptView
+        raw={entry.raw_transcript}
+        cleaned={
+          entry.cleaned_transcript
+        }
       />
+    </article>
+  );
+}
+
+function TranscriptFields({
+  rawTranscript,
+  cleanedTranscript,
+  setRawTranscript,
+  setCleanedTranscript,
+}: {
+  rawTranscript: string;
+  cleanedTranscript: string;
+  setRawTranscript: (
+    value: string
+  ) => void;
+  setCleanedTranscript: (
+    value: string
+  ) => void;
+}) {
+  return (
+    <div className="mt-4 border border-[#242424] bg-[#030303] p-3">
+      <p className="terminal-green mb-3 text-xs uppercase tracking-[0.18em]">
+        &gt; transcript
+      </p>
+      <label className="block">
+        <FieldLabel>Raw transcript</FieldLabel>
+        <textarea
+          value={rawTranscript}
+          onChange={(event) =>
+            setRawTranscript(
+              event.target.value
+            )
+          }
+          className={`${inputClassName} min-h-[110px] resize-y leading-6`}
+          placeholder="Speech-to-text or manual transcript..."
+        />
+      </label>
+      <label className="mt-3 block">
+        <FieldLabel>
+          Cleaned transcript
+        </FieldLabel>
+        <textarea
+          value={cleanedTranscript}
+          onChange={(event) =>
+            setCleanedTranscript(
+              event.target.value
+            )
+          }
+          className={`${inputClassName} min-h-[110px] resize-y leading-6`}
+          placeholder="Cleaned version..."
+        />
+      </label>
     </div>
   );
 }
 
-function ReflectionSection({
-  title,
-  content,
+function TranscriptView({
+  raw,
+  cleaned,
 }: {
-  title: string;
-  content: string | null;
+  raw: string | null;
+  cleaned: string | null;
 }) {
-  if (!content) {
-    return null;
-  }
+  if (!raw && !cleaned) return null;
 
   return (
-    <div className="mt-3">
-      <p className="terminal-green">{title}:</p>
-      <p className="terminal-muted mt-1 whitespace-pre-wrap">
-        {content}
-      </p>
+    <div className="mt-3 border border-[#242424] bg-[#030303] p-3">
+      {raw ? (
+        <div>
+          <p className="terminal-green">
+            raw transcript:
+          </p>
+          <p className="terminal-muted mt-1 whitespace-pre-wrap leading-6">
+            {raw}
+          </p>
+        </div>
+      ) : null}
+      {cleaned ? (
+        <div className={raw ? "mt-3" : ""}>
+          <p className="terminal-green">
+            cleaned transcript:
+          </p>
+          <p className="terminal-muted mt-1 whitespace-pre-wrap leading-6">
+            {cleaned}
+          </p>
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+const inputClassName =
+  "mt-2 w-full border border-[#242424] bg-[#050505] px-3 py-3 text-sm text-[#e5e5e5] outline-none focus:border-[#39ff88]";
+
+function FieldLabel({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <span className="terminal-muted text-[11px] uppercase tracking-[0.18em]">
+      {children}
+    </span>
   );
 }
 
@@ -640,36 +686,7 @@ function TerminalBlock({
           &gt; {title}
         </p>
       </div>
-
       <div className="p-3">{children}</div>
     </section>
-  );
-}
-
-function TerminalRow({
-  label,
-  value,
-  green = false,
-}: {
-  label: string;
-  value: string;
-  green?: boolean;
-}) {
-  return (
-    <div className="terminal-line flex items-center justify-between gap-4 py-2">
-      <span className="terminal-muted text-xs">
-        {label}
-      </span>
-
-      <span
-        className={
-          green
-            ? "terminal-green text-right text-xs"
-            : "text-right text-xs text-[#e5e5e5]"
-        }
-      >
-        {value}
-      </span>
-    </div>
   );
 }
