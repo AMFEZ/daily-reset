@@ -13,11 +13,18 @@ import { ReminderSettingsPanel, type ReminderSetting } from "@/components/remind
 import { AIReflectionPanel } from "@/components/reset/AIReflectionPanel";
 import { BodyDataPanel } from "@/components/reset/BodyDataPanel";
 import { DreamArchivePanel } from "@/components/reset/DreamArchivePanel";
+import { DreamOrganizationPanel } from "@/components/reset/DreamOrganizationPanel";
+import { GoalsPanel, type ResetGoal } from "@/components/reset/GoalsPanel";
 import { ModuleAccordion } from "@/components/reset/ModuleAccordion";
 import { NutritionPanel } from "@/components/reset/NutritionPanel";
 import { ProtocolManagerPanel, type ManagedProtocol } from "@/components/reset/ProtocolManagerPanel";
 import { ProtocolReliabilityPanel } from "@/components/reset/ProtocolReliabilityPanel";
-import { ReflectionLogPanel } from "@/components/reset/ReflectionLogPanel";
+import {
+  ReprogramJournalPanel,
+  type ReprogramBelief,
+  type ReprogramDesire,
+  type ReprogramEmotionLog,
+} from "@/components/reset/ReprogramJournalPanel";
 import { ResetCalendarPanel } from "@/components/reset/ResetCalendarPanel";
 import { ResetDashboard } from "@/components/reset/ResetDashboard";
 import { ResetHistoryPanel } from "@/components/reset/ResetHistoryPanel";
@@ -348,6 +355,92 @@ export default async function Home() {
   );
 
   const {
+    data: goalRows,
+    error: goalRowsError,
+  } = await supabase
+    .from("reset_goals")
+    .select(
+      "id, title, goal_type, current_value, target_value, unit, deadline, status, notes, created_at, updated_at"
+    )
+    .order("updated_at", { ascending: false });
+
+  if (goalRowsError) {
+    throw new Error(goalRowsError.message);
+  }
+
+  const initialGoals: ResetGoal[] = (
+    goalRows ?? []
+  ).map((goal) => ({
+    id: goal.id,
+    title: goal.title,
+    goal_type:
+      goal.goal_type === "milestone"
+        ? "milestone"
+        : "number",
+    current_value: Number(
+      goal.current_value ?? 0
+    ),
+    target_value: Number(
+      goal.target_value ?? 1
+    ),
+    unit: goal.unit,
+    deadline: goal.deadline,
+    status:
+      goal.status === "complete" ||
+      goal.status === "paused"
+        ? goal.status
+        : "active",
+    notes: goal.notes,
+    created_at: goal.created_at,
+    updated_at: goal.updated_at,
+  }));
+
+  const {
+    data: reprogramDesires,
+    error: reprogramDesiresError,
+  } = await supabase
+    .from("reprogram_desires")
+    .select(
+      "id, desire, desire_emotions, absence_emotions, current_emotional_satisfaction, created_at, updated_at"
+    )
+    .order("created_at", { ascending: false })
+    .limit(100);
+
+  if (reprogramDesiresError) {
+    throw new Error(reprogramDesiresError.message);
+  }
+
+  const {
+    data: reprogramEmotionLogs,
+    error: reprogramEmotionLogsError,
+  } = await supabase
+    .from("reprogram_emotion_logs")
+    .select(
+      "id, trigger, emotion, alignment_status, occurred_at, created_at, updated_at"
+    )
+    .order("occurred_at", { ascending: false })
+    .limit(100);
+
+  if (reprogramEmotionLogsError) {
+    throw new Error(reprogramEmotionLogsError.message);
+  }
+
+  const {
+    data: reprogramBeliefs,
+    error: reprogramBeliefsError,
+  } = await supabase
+    .from("reprogram_beliefs")
+    .select(
+      "id, faulty_belief, reconstruction_script, intensity_score, is_displaced, displaced_at, created_at, updated_at"
+    )
+    .order("created_at", { ascending: false })
+    .limit(100);
+
+  if (reprogramBeliefsError) {
+    throw new Error(reprogramBeliefsError.message);
+  }
+
+  const {
     data: aiReflections,
     error: aiReflectionsError,
   } = await supabase
@@ -375,6 +468,22 @@ export default async function Home() {
     (resetScores ?? []).find(
       (score) => score.date === today
     ) ?? null;
+
+  const todayProtein = (proteinLogs ?? [])
+    .filter((log) => log.date === today)
+    .reduce(
+      (sum, log) =>
+        sum + Number(log.amount ?? 0),
+      0
+    );
+
+  const latestWeight =
+    (weightLogs ?? [])[0] ?? null;
+
+  const activeGoalCount =
+    initialGoals.filter(
+      (goal) => goal.status === "active"
+    ).length;
 
   return (
     <main className="min-h-screen bg-black px-0 py-0 text-sm text-[#e5e5e5] sm:px-3 sm:py-4 md:px-8 md:py-8">
@@ -425,6 +534,26 @@ export default async function Home() {
               }
               timeZone={
                 initialSettings.timezone
+              }
+              currentStreak={
+                streakStats.currentStreak
+              }
+              todayProtein={todayProtein}
+              proteinTarget={
+                initialSettings.protein_target
+              }
+              latestWeight={
+                latestWeight
+                  ? Number(latestWeight.weight)
+                  : null
+              }
+              weightUnit={
+                latestWeight?.unit === "kg"
+                  ? "kg"
+                  : "lbs"
+              }
+              activeGoalCount={
+                activeGoalCount
               }
             >
               <div>
@@ -478,39 +607,112 @@ export default async function Home() {
                 </ModuleAccordion>
 
                 <ModuleAccordion
-                  id="reflection-log"
-                  title="reflection.log"
-                  subtitle="Written, recorded, and transcribed reflection"
+                  id="reprogram-journal"
+                  title="reprogram.journal"
+                  subtitle="Desires, emotional signals, and belief reconstruction"
                 >
-                  <ReflectionLogPanel
-                    initialEntries={(journalEntries ?? [])
-                      .filter(
-                        (entry) =>
-                          entry.entry_type ===
-                            "reflection" ||
-                          entry.entry_type ===
-                            "freewrite"
-                      )
-                      .map((entry) => ({
+                  <ReprogramJournalPanel
+                    userId={user.id}
+                    initialDesires={(
+                      reprogramDesires ?? []
+                    ).map(
+                      (entry): ReprogramDesire => ({
                         id: entry.id,
-                        entry_type:
-                          entry.entry_type as
-                            | "reflection"
-                            | "freewrite",
+                        desire: entry.desire,
+                        desire_emotions:
+                          entry.desire_emotions,
+                        absence_emotions:
+                          entry.absence_emotions,
+                        current_emotional_satisfaction:
+                          Number(
+                            entry.current_emotional_satisfaction ??
+                              0
+                          ),
+                        created_at:
+                          entry.created_at,
+                        updated_at:
+                          entry.updated_at,
+                      })
+                    )}
+                    initialEmotionLogs={(
+                      reprogramEmotionLogs ?? []
+                    ).map(
+                      (
+                        entry
+                      ): ReprogramEmotionLog => ({
+                        id: entry.id,
+                        trigger: entry.trigger,
+                        emotion: entry.emotion,
+                        alignment_status:
+                          entry.alignment_status ===
+                          "allowing"
+                            ? "allowing"
+                            : "blocking",
+                        occurred_at:
+                          entry.occurred_at,
+                        created_at:
+                          entry.created_at,
+                        updated_at:
+                          entry.updated_at,
+                      })
+                    )}
+                    initialBeliefs={(
+                      reprogramBeliefs ?? []
+                    ).map(
+                      (entry): ReprogramBelief => ({
+                        id: entry.id,
+                        faulty_belief:
+                          entry.faulty_belief,
+                        reconstruction_script:
+                          entry.reconstruction_script,
+                        intensity_score: Number(
+                          entry.intensity_score ?? 0
+                        ),
+                        is_displaced: Boolean(
+                          entry.is_displaced
+                        ),
+                        displaced_at:
+                          entry.displaced_at,
+                        created_at:
+                          entry.created_at,
+                        updated_at:
+                          entry.updated_at,
+                      })
+                    )}
+                  />
+                </ModuleAccordion>
+
+                <ModuleAccordion
+                  id="goals-milestones"
+                  title="goals.milestones"
+                  subtitle="Long-term outcomes and measurable progress"
+                >
+                  <GoalsPanel
+                    initialGoals={initialGoals}
+                  />
+                </ModuleAccordion>
+
+                <ModuleAccordion
+                  id="dream-index"
+                  title="dream.index"
+                  subtitle="Search, filter, and review recurring dream signals"
+                >
+                  <DreamOrganizationPanel
+                    initialEntries={dreamEntries.map(
+                      (entry) => ({
+                        id: entry.id,
                         title: entry.title,
                         content: entry.content,
                         mood: entry.mood,
-                        energy: entry.energy,
                         tags: entry.tags,
-                        audio_path:
-                          entry.audio_path,
                         raw_transcript:
                           entry.raw_transcript,
                         cleaned_transcript:
                           entry.cleaned_transcript,
                         created_at:
                           entry.created_at,
-                      }))}
+                      })
+                    )}
                   />
                 </ModuleAccordion>
 

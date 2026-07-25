@@ -1,7 +1,7 @@
 "use client";
 
 import { ResetScorePanel } from "@/components/reset/ResetScorePanel";
-import { useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { createClient } from "@/utils/supabase/client";
 
 type RoutineType =
@@ -44,6 +44,12 @@ type ResetDashboardProps = {
   initialIsLocked: boolean;
   initialLockedAt: string | null;
   timeZone: string;
+  currentStreak: number;
+  todayProtein: number;
+  proteinTarget: number;
+  latestWeight: number | null;
+  weightUnit: "lbs" | "kg";
+  activeGoalCount: number;
   children?: React.ReactNode;
 };
 
@@ -70,6 +76,12 @@ export function ResetDashboard({
   initialIsLocked,
   initialLockedAt,
   timeZone,
+  currentStreak,
+  todayProtein,
+  proteinTarget,
+  latestWeight,
+  weightUnit,
+  activeGoalCount,
   children,
 }: ResetDashboardProps) {
   const supabase = createClient();
@@ -79,6 +91,9 @@ export function ResetDashboard({
     useTransition();
   const [saveError, setSaveError] =
     useState<string | null>(null);
+  const [syncMessage, setSyncMessage] =
+    useState<string | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [lockError, setLockError] =
     useState<string | null>(null);
   const [hasResetRecord, setHasResetRecord] =
@@ -99,6 +114,67 @@ export function ResetDashboard({
       {}
     )
   );
+
+  const refreshHabitLogs = useCallback(async () => {
+    setIsSyncing(true);
+
+    const { data, error } = await supabase
+      .from("habit_logs")
+      .select("habit_id, completed")
+      .eq("date", getTodayKey(timeZone));
+
+    if (error) {
+      console.error("Habit refresh failed:", error.message);
+      setSyncMessage(`Sync failed: ${error.message}`);
+      setIsSyncing(false);
+      return;
+    }
+
+    const nextMap = (data ?? []).reduce<Record<string, boolean>>(
+      (accumulator, log) => {
+        accumulator[String(log.habit_id)] = Boolean(log.completed);
+        return accumulator;
+      },
+      {}
+    );
+
+    setCompletedMap(nextMap);
+    setSyncMessage(null);
+    setIsSyncing(false);
+  }, [supabase, timeZone]);
+
+  useEffect(() => {
+    const handleFocus = () => {
+      void refreshHabitLogs();
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        void refreshHabitLogs();
+      }
+    };
+
+    const handleActivitySaved = () => {
+      void refreshHabitLogs();
+    };
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("daily-reset:activity-saved", handleActivitySaved);
+
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void refreshHabitLogs();
+      }
+    }, 30000);
+
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("daily-reset:activity-saved", handleActivitySaved);
+      window.clearInterval(intervalId);
+    };
+  }, [refreshHabitLogs]);
 
   const sortedHabits = useMemo(
     () =>
@@ -275,6 +351,32 @@ export function ResetDashboard({
         }
       />
 
+      <div className="mt-3 flex min-h-[34px] flex-wrap items-center justify-between gap-2 border border-[#242424] bg-[#050505] px-3 py-2 text-[11px]">
+        <span className={syncMessage ? "text-[#ffb020]" : "terminal-muted"}>
+          &gt; {syncMessage ?? (isSyncing ? "syncing activity data..." : "activity sync online")}
+        </span>
+        <button
+          type="button"
+          onClick={() => void refreshHabitLogs()}
+          disabled={isSyncing}
+          className="min-h-[32px] border border-[#242424] px-2 text-[#39ff88] transition hover:border-[#39ff88] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isSyncing ? "syncing..." : "refresh"}
+        </button>
+      </div>
+
+      <CommandCenter
+        resetScore={progress.resetScore}
+        currentStreak={currentStreak}
+        morningProgress={progress.morning}
+        nightProgress={progress.night}
+        todayProtein={todayProtein}
+        proteinTarget={proteinTarget}
+        latestWeight={latestWeight}
+        weightUnit={weightUnit}
+        activeGoalCount={activeGoalCount}
+      />
+
       <div className="mt-5 grid gap-3 sm:mt-6 sm:gap-4 lg:grid-cols-[1.1fr_0.9fr]">
         <div className="space-y-4">
           <TerminalBlock title="body.data">
@@ -370,8 +472,12 @@ export function ResetDashboard({
               targetId="dream-archive"
             />
             <JumpButton
-              label="open reflection_log"
-              targetId="reflection-log"
+              label="open goals_milestones"
+              targetId="goals-milestones"
+            />
+            <JumpButton
+              label="open reprogram_journal"
+              targetId="reprogram-journal"
             />
             <JumpButton
               label="open shadow_console"
@@ -534,6 +640,144 @@ export function ResetDashboard({
           </p>
         </TerminalBlock>
       </div>
+    </div>
+  );
+}
+
+function CommandCenter({
+  resetScore,
+  currentStreak,
+  morningProgress,
+  nightProgress,
+  todayProtein,
+  proteinTarget,
+  latestWeight,
+  weightUnit,
+  activeGoalCount,
+}: {
+  resetScore: number;
+  currentStreak: number;
+  morningProgress: number;
+  nightProgress: number;
+  todayProtein: number;
+  proteinTarget: number;
+  latestWeight: number | null;
+  weightUnit: "lbs" | "kg";
+  activeGoalCount: number;
+}) {
+  const hour = new Date().getHours();
+  const greeting =
+    hour < 12
+      ? "GOOD MORNING"
+      : hour < 18
+        ? "GOOD AFTERNOON"
+        : "GOOD EVENING";
+
+  return (
+    <section className="mt-5 border border-[#39ff88] bg-black sm:mt-6">
+      <div className="border-b border-[#242424] bg-[#050505] px-3 py-3">
+        <p className="terminal-green text-xs uppercase tracking-[0.22em]">
+          &gt; command.center
+        </p>
+        <p className="mt-2 text-lg text-[#e5e5e5]">
+          {greeting}
+        </p>
+      </div>
+
+      <div className="grid gap-px bg-[#242424] sm:grid-cols-2 lg:grid-cols-4">
+        <CommandSignal
+          label="TODAY RESET"
+          value={`${resetScore}%`}
+          progress={resetScore}
+        />
+        <CommandSignal
+          label="CURRENT STREAK"
+          value={`${currentStreak} DAYS`}
+        />
+        <CommandSignal
+          label="PROTEIN"
+          value={`${todayProtein} / ${proteinTarget}g`}
+          progress={
+            proteinTarget > 0
+              ? Math.min(
+                  100,
+                  Math.round(
+                    (todayProtein /
+                      proteinTarget) *
+                      100
+                  )
+                )
+              : 0
+          }
+        />
+        <CommandSignal
+          label="LATEST WEIGHT"
+          value={
+            latestWeight === null
+              ? "NO DATA"
+              : `${latestWeight} ${weightUnit}`
+          }
+        />
+        <CommandSignal
+          label="MORNING"
+          value={`${morningProgress}%`}
+          progress={morningProgress}
+        />
+        <CommandSignal
+          label="NIGHT"
+          value={`${nightProgress}%`}
+          progress={nightProgress}
+        />
+        <CommandSignal
+          label="ACTIVE GOALS"
+          value={String(activeGoalCount)}
+        />
+        <CommandSignal
+          label="SYSTEM"
+          value={
+            resetScore >= 80
+              ? "FULL RESET"
+              : resetScore >= 50
+                ? "SOLID DAY"
+                : "REPROGRAMMING"
+          }
+        />
+      </div>
+    </section>
+  );
+}
+
+function CommandSignal({
+  label,
+  value,
+  progress,
+}: {
+  label: string;
+  value: string;
+  progress?: number;
+}) {
+  return (
+    <div className="bg-black p-3">
+      <p className="terminal-muted text-[10px] uppercase tracking-[0.16em]">
+        {label}
+      </p>
+      <p className="terminal-green mt-2 text-lg">
+        {value}
+      </p>
+
+      {typeof progress === "number" ? (
+        <div className="mt-2 h-1 overflow-hidden bg-[#121212]">
+          <div
+            className="h-full bg-[#39ff88]"
+            style={{
+              width: `${Math.max(
+                0,
+                Math.min(100, progress)
+              )}%`,
+            }}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
