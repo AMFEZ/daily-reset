@@ -1,8 +1,16 @@
 "use client";
 
 import { ResetScorePanel } from "@/components/reset/ResetScorePanel";
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/utils/supabase/client";
+import {
+  DAILY_RESET_DATA_CHANGED_EVENT,
+  dispatchDailyResetDataChanged,
+  type DailyResetDataChangedDetail,
+} from "@/lib/dailyResetEvents";
+import {
+  useDailyResetRealtime,
+} from "@/lib/useDailyResetRealtime";
 
 type RoutineType =
   | "morning"
@@ -34,6 +42,13 @@ type ResetLockRow = {
   lock_state: boolean;
   lock_timestamp: string | null;
 };
+
+type SystemStatusTone =
+  | "ready"
+  | "saving"
+  | "success"
+  | "warning"
+  | "error";
 
 type ResetDashboardProps = {
   userEmail: string;
@@ -84,13 +99,45 @@ export function ResetDashboard({
   activeGoalCount,
   children,
 }: ResetDashboardProps) {
-  const supabase = createClient();
-  const [isPending, startTransition] =
-    useTransition();
-  const [isLockPending, startLockTransition] =
-    useTransition();
+  const supabase = useMemo(
+    () => createClient(),
+    []
+  );
+  const saveSuccessTimer =
+    useRef<number | null>(null);
+  const habitRefreshTimer =
+    useRef<number | null>(null);
+  const habitRefreshRequestId =
+    useRef(0);
+  const metricRefreshTimers =
+    useRef<{
+      weight: number | null;
+      protein: number | null;
+    }>({
+      weight: null,
+      protein: null,
+    });
+  const metricRefreshRequestIds =
+    useRef({
+      weight: 0,
+      protein: 0,
+    });
+  const isMountedRef =
+    useRef(true);
+  const pendingHabitIdsRef =
+    useRef<Set<string>>(new Set());
+  const [pendingHabitIds, setPendingHabitIds] =
+    useState<Set<string>>(() => new Set());
+  const [isLockPending, setIsLockPending] =
+    useState(false);
   const [saveError, setSaveError] =
     useState<string | null>(null);
+  const [saveSuccess, setSaveSuccess] =
+    useState<string | null>(null);
+  const [failedHabit, setFailedHabit] =
+    useState<Habit | null>(null);
+  const [isOnline, setIsOnline] =
+    useState(true);
   const [syncMessage, setSyncMessage] =
     useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -102,6 +149,18 @@ export function ResetDashboard({
     useState(initialIsLocked);
   const [lockedAt, setLockedAt] =
     useState<string | null>(initialLockedAt);
+  const [liveTodayProtein, setLiveTodayProtein] =
+    useState(todayProtein);
+  const [liveLatestWeight, setLiveLatestWeight] =
+    useState<number | null>(latestWeight);
+  const [liveWeightUnit, setLiveWeightUnit] =
+    useState<"lbs" | "kg">(weightUnit);
+  const [analyticsDirty, setAnalyticsDirty] =
+    useState(false);
+  const todayKey = useMemo(
+    () => getTodayKey(timeZone),
+    [timeZone]
+  );
 
   const [completedMap, setCompletedMap] = useState<
     Record<string, boolean>
@@ -115,66 +174,604 @@ export function ResetDashboard({
     )
   );
 
+  const showSaveSuccess = useCallback(
+    (message: string) => {
+      if (saveSuccessTimer.current) {
+        window.clearTimeout(
+          saveSuccessTimer.current
+        );
+      }
+
+      setSaveSuccess(message);
+
+      saveSuccessTimer.current =
+        window.setTimeout(() => {
+          setSaveSuccess(null);
+          saveSuccessTimer.current = null;
+        }, 2200);
+    },
+    []
+  );
+
   const refreshHabitLogs = useCallback(async () => {
-    setIsSyncing(true);
+    const requestId =
+      ++habitRefreshRequestId.current;
 
-    const { data, error } = await supabase
-      .from("habit_logs")
-      .select("habit_id, completed")
-      .eq("date", getTodayKey(timeZone));
-
-    if (error) {
-      console.error("Habit refresh failed:", error.message);
-      setSyncMessage(`Sync failed: ${error.message}`);
-      setIsSyncing(false);
-      return;
+    if (isMountedRef.current) {
+      setIsSyncing(true);
     }
 
-    const nextMap = (data ?? []).reduce<Record<string, boolean>>(
-      (accumulator, log) => {
-        accumulator[String(log.habit_id)] = Boolean(log.completed);
-        return accumulator;
+    let refreshTimeout:
+      | number
+      | null = null;
+
+    try {
+      const query = supabase
+        .from("habit_logs")
+        .select("habit_id, completed")
+        .eq("date", todayKey);
+
+      const timeout =
+        new Promise<never>(
+          (_, reject) => {
+            refreshTimeout =
+              window.setTimeout(() => {
+                reject(
+                  new Error(
+                    "Activity refresh timed out. Try again."
+                  )
+                );
+              }, 8000);
+          }
+        );
+
+      const { data, error } =
+        await Promise.race([
+          query,
+          timeout,
+        ]);
+
+      if (error) {
+        throw error;
+      }
+
+      if (
+        !isMountedRef.current ||
+        requestId !==
+          habitRefreshRequestId.current
+      ) {
+        return;
+      }
+
+      const habitLogRows = (
+        data ?? []
+      ) as Array<{
+        habit_id: string | number;
+        completed: boolean | null;
+      }>;
+
+      const nextMap =
+        habitLogRows.reduce(
+          (
+            accumulator:
+              Record<string, boolean>,
+            log
+          ) => {
+            accumulator[
+              String(log.habit_id)
+            ] = Boolean(
+              log.completed
+            );
+            return accumulator;
+          },
+          {}
+        );
+
+      setCompletedMap((current) => {
+        const merged = { ...nextMap };
+
+        for (
+          const habitId of
+          pendingHabitIdsRef.current
+        ) {
+          if (habitId in current) {
+            merged[habitId] =
+              current[habitId];
+          }
+        }
+
+        return merged;
+      });
+      setSyncMessage(null);
+    } catch (error) {
+      if (
+        !isMountedRef.current ||
+        requestId !==
+          habitRefreshRequestId.current
+      ) {
+        return;
+      }
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Habit refresh failed.";
+
+      console.error(
+        "Habit refresh failed:",
+        message
+      );
+      setSyncMessage(
+        `Sync failed: ${message}`
+      );
+    } finally {
+      if (refreshTimeout) {
+        window.clearTimeout(
+          refreshTimeout
+        );
+      }
+
+      if (
+        isMountedRef.current &&
+        requestId ===
+          habitRefreshRequestId.current
+      ) {
+        setIsSyncing(false);
+      }
+    }
+  }, [supabase, todayKey]);
+
+  const scheduleHabitRefresh = useCallback(
+    (delay = 350) => {
+      if (habitRefreshTimer.current) {
+        window.clearTimeout(
+          habitRefreshTimer.current
+        );
+      }
+
+      habitRefreshTimer.current =
+        window.setTimeout(() => {
+          habitRefreshTimer.current = null;
+          void refreshHabitLogs();
+        }, delay);
+    },
+    [refreshHabitLogs]
+  );
+
+  const refreshLiveWeight =
+    useCallback(async () => {
+      const requestId =
+        ++metricRefreshRequestIds
+          .current.weight;
+
+      const { data, error } =
+        await supabase
+          .from("weight_logs")
+          .select("weight, unit")
+          .order("date", {
+            ascending: false,
+          })
+          .limit(1)
+          .maybeSingle();
+
+      if (
+        !isMountedRef.current ||
+        requestId !==
+          metricRefreshRequestIds
+            .current.weight
+      ) {
+        return;
+      }
+
+      if (error) {
+        console.error(
+          "Realtime weight refresh failed:",
+          error.message
+        );
+        return;
+      }
+
+      setLiveLatestWeight(
+        data
+          ? Number(data.weight)
+          : null
+      );
+
+      if (
+        data?.unit === "lbs" ||
+        data?.unit === "kg"
+      ) {
+        setLiveWeightUnit(data.unit);
+      }
+    }, [supabase]);
+
+  const refreshLiveProtein =
+    useCallback(async () => {
+      const requestId =
+        ++metricRefreshRequestIds
+          .current.protein;
+
+      const { data, error } =
+        await supabase
+          .from("protein_logs")
+          .select("amount")
+          .eq("date", todayKey);
+
+      if (
+        !isMountedRef.current ||
+        requestId !==
+          metricRefreshRequestIds
+            .current.protein
+      ) {
+        return;
+      }
+
+      if (error) {
+        console.error(
+          "Realtime protein refresh failed:",
+          error.message
+        );
+        return;
+      }
+
+      const proteinRows = (
+        data ?? []
+      ) as Array<{
+        amount: number | string | null;
+      }>;
+
+      const total = proteinRows.reduce(
+        (
+          sum: number,
+          log
+        ) =>
+          sum + Number(
+            log.amount ?? 0
+          ),
+        0
+      );
+
+      setLiveTodayProtein(total);
+    }, [supabase, todayKey]);
+
+  const scheduleMetricRefresh =
+    useCallback(
+      (
+        metric:
+          | "weight"
+          | "protein",
+        delay = 200
+      ) => {
+        const currentTimer =
+          metricRefreshTimers.current[
+            metric
+          ];
+
+        if (currentTimer) {
+          window.clearTimeout(
+            currentTimer
+          );
+        }
+
+        metricRefreshTimers.current[
+          metric
+        ] = window.setTimeout(() => {
+          metricRefreshTimers.current[
+            metric
+          ] = null;
+
+          if (metric === "weight") {
+            void refreshLiveWeight();
+          } else {
+            void refreshLiveProtein();
+          }
+        }, delay);
       },
-      {}
+      [
+        refreshLiveProtein,
+        refreshLiveWeight,
+      ]
     );
 
-    setCompletedMap(nextMap);
-    setSyncMessage(null);
-    setIsSyncing(false);
-  }, [supabase, timeZone]);
+  const handleRealtimeHabitUpsert =
+    useCallback(
+      (
+        row:
+          Record<string, unknown>
+      ) => {
+        if (
+          row.date &&
+          String(row.date) !==
+            todayKey
+        ) {
+          return;
+        }
+
+        const habitId =
+          typeof row.habit_id ===
+            "string"
+            ? row.habit_id
+            : String(
+                row.habit_id ?? ""
+              );
+
+        if (!habitId) {
+          return;
+        }
+
+        if (
+          pendingHabitIdsRef.current.has(
+            habitId
+          )
+        ) {
+          return;
+        }
+
+        setCompletedMap((current) => ({
+          ...current,
+          [habitId]: Boolean(
+            row.completed
+          ),
+        }));
+        setAnalyticsDirty(true);
+      },
+      [todayKey]
+    );
+
+  const handleRealtimeHabitDelete =
+    useCallback(() => {
+      scheduleHabitRefresh(150);
+      setAnalyticsDirty(true);
+    }, [scheduleHabitRefresh]);
+
+  const handleRealtimeWeightChange =
+    useCallback(() => {
+      scheduleMetricRefresh(
+        "weight"
+      );
+      setAnalyticsDirty(true);
+    }, [scheduleMetricRefresh]);
+
+  const handleRealtimeProteinChange =
+    useCallback(() => {
+      scheduleMetricRefresh(
+        "protein"
+      );
+      setAnalyticsDirty(true);
+    }, [scheduleMetricRefresh]);
+
+  const realtimeStatus =
+    useDailyResetRealtime({
+      supabase,
+      date: todayKey,
+      onHabitUpsert:
+        handleRealtimeHabitUpsert,
+      onHabitDelete:
+        handleRealtimeHabitDelete,
+      onWeightChange:
+        handleRealtimeWeightChange,
+      onProteinChange:
+        handleRealtimeProteinChange,
+    });
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Synchronize local live metric state when server props change.
+    setLiveTodayProtein(todayProtein);
+  }, [todayProtein]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Synchronize local live metric state when server props change.
+    setLiveLatestWeight(latestWeight);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Synchronize the local display unit when server props change.
+    setLiveWeightUnit(weightUnit);
+  }, [latestWeight, weightUnit]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+
+    return () => {
+      isMountedRef.current = false;
+      habitRefreshRequestId.current += 1;
+      metricRefreshRequestIds.current
+        .weight += 1;
+      metricRefreshRequestIds.current
+        .protein += 1;
+
+      for (
+        const metric of [
+          "weight",
+          "protein",
+        ] as const
+      ) {
+        const timer =
+          metricRefreshTimers.current[
+            metric
+          ];
+
+        if (timer) {
+          window.clearTimeout(timer);
+          metricRefreshTimers.current[
+            metric
+          ] = null;
+        }
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const updateConnectionState = () => {
+      const online = navigator.onLine;
+      setIsOnline(online);
+
+      if (online) {
+        setSaveError((current) =>
+          current ===
+          "You are offline. Reconnect before saving habits."
+            ? null
+            : current
+        );
+        dispatchDailyResetDataChanged({
+          scopes: ["habits"],
+          source: "reconnect",
+          date: todayKey,
+        });
+      }
+    };
+
+    updateConnectionState();
+
+    window.addEventListener(
+      "online",
+      updateConnectionState
+    );
+    window.addEventListener(
+      "offline",
+      updateConnectionState
+    );
+
+    return () => {
+      window.removeEventListener(
+        "online",
+        updateConnectionState
+      );
+      window.removeEventListener(
+        "offline",
+        updateConnectionState
+      );
+    };
+  }, [todayKey]);
 
   useEffect(() => {
     const handleFocus = () => {
-      void refreshHabitLogs();
+      scheduleHabitRefresh(0);
     };
 
     const handleVisibility = () => {
       if (document.visibilityState === "visible") {
-        void refreshHabitLogs();
+        scheduleHabitRefresh(0);
       }
     };
 
-    const handleActivitySaved = () => {
-      void refreshHabitLogs();
+    const handleDataChanged = (
+      event: Event
+    ) => {
+      const detail =
+        (
+          event as CustomEvent<
+            DailyResetDataChangedDetail
+          >
+        ).detail;
+
+      if (
+        !detail ||
+        !Array.isArray(detail.scopes)
+      ) {
+        return;
+      }
+
+      const isToday =
+        !detail.date ||
+        detail.date === getTodayKey(timeZone);
+      const refreshesHabits =
+        detail.scopes.includes("habits");
+      const refreshesAnalytics =
+        detail.scopes.includes("analytics");
+
+      if (
+        isToday &&
+        detail.habitId &&
+        refreshesHabits
+      ) {
+        const completed =
+          detail.completed ?? true;
+
+        setCompletedMap((current) => ({
+          ...current,
+          [detail.habitId as string]:
+            completed,
+        }));
+
+        if (detail.habitName) {
+          setSaveError(null);
+          setFailedHabit(null);
+          showSaveSuccess(
+            `${detail.habitName} ${
+              completed
+                ? "synced"
+                : "unchecked"
+            }.`
+          );
+        }
+      }
+
+      if (isToday && refreshesHabits) {
+        scheduleHabitRefresh();
+      }
+
+      if (detail.metrics) {
+        if (
+          typeof detail.metrics.todayProtein ===
+          "number"
+        ) {
+          setLiveTodayProtein(
+            detail.metrics.todayProtein
+          );
+        }
+
+        if (
+          "latestWeight" in detail.metrics
+        ) {
+          setLiveLatestWeight(
+            detail.metrics.latestWeight ?? null
+          );
+        }
+
+        if (detail.metrics.weightUnit) {
+          setLiveWeightUnit(
+            detail.metrics.weightUnit
+          );
+        }
+      }
+
+      if (refreshesAnalytics) {
+        setAnalyticsDirty(true);
+      }
     };
 
     window.addEventListener("focus", handleFocus);
     document.addEventListener("visibilitychange", handleVisibility);
-    window.addEventListener("daily-reset:activity-saved", handleActivitySaved);
-
-    const intervalId = window.setInterval(() => {
-      if (document.visibilityState === "visible") {
-        void refreshHabitLogs();
-      }
-    }, 30000);
+    window.addEventListener(
+      DAILY_RESET_DATA_CHANGED_EVENT,
+      handleDataChanged
+    );
 
     return () => {
       window.removeEventListener("focus", handleFocus);
       document.removeEventListener("visibilitychange", handleVisibility);
-      window.removeEventListener("daily-reset:activity-saved", handleActivitySaved);
-      window.clearInterval(intervalId);
+      window.removeEventListener(
+        DAILY_RESET_DATA_CHANGED_EVENT,
+        handleDataChanged
+      );
+
+      if (saveSuccessTimer.current) {
+        window.clearTimeout(
+          saveSuccessTimer.current
+        );
+        saveSuccessTimer.current = null;
+      }
+
+      if (habitRefreshTimer.current) {
+        window.clearTimeout(
+          habitRefreshTimer.current
+        );
+        habitRefreshTimer.current = null;
+      }
     };
-  }, [refreshHabitLogs]);
+  }, [
+    scheduleHabitRefresh,
+    showSaveSuccess,
+    timeZone,
+  ]);
 
   const sortedHabits = useMemo(
     () =>
@@ -248,7 +845,7 @@ export function ResetDashboard({
     };
   }, [completedMap, grouped]);
 
-  function toggleHabit(habit: Habit) {
+  async function toggleHabit(habit: Habit) {
     if (isLocked) {
       setSaveError(
         "Today is locked. Unlock the reset before editing protocols."
@@ -256,47 +853,99 @@ export function ResetDashboard({
       return;
     }
 
+    if (
+      pendingHabitIdsRef.current.has(
+        habit.id
+      )
+    ) {
+      return;
+    }
+
+    const previousCompleted =
+      Boolean(completedMap[habit.id]);
     const nextCompleted =
-      !completedMap[habit.id];
+      !previousCompleted;
+
+    pendingHabitIdsRef.current.add(
+      habit.id
+    );
 
     setSaveError(null);
+    setSaveSuccess(null);
+    setFailedHabit(null);
     setLockError(null);
+    setPendingHabitIds((current) => {
+      const next = new Set(current);
+      next.add(habit.id);
+      return next;
+    });
 
     setCompletedMap((current) => ({
       ...current,
       [habit.id]: nextCompleted,
     }));
 
-    startTransition(async () => {
+    try {
       const { error } = await supabase.rpc(
         "toggle_habit_and_save_reset_v2",
         {
           target_habit_id: habit.id,
-          target_date: getTodayKey(timeZone),
+          target_date: todayKey,
           target_completed: nextCompleted,
         }
       );
 
       if (error) {
-        console.error(
-          "Habit and reset update failed:",
-          error.message
-        );
-
-        setCompletedMap((current) => ({
-          ...current,
-          [habit.id]: !nextCompleted,
-        }));
-
-        setSaveError(error.message);
-        return;
+        throw error;
       }
 
       setHasResetRecord(true);
-    });
+      setFailedHabit(null);
+      dispatchDailyResetDataChanged({
+        scopes: ["habits", "analytics"],
+        source: "manual-habit",
+        habitId: habit.id,
+        habitName: habit.name,
+        completed: nextCompleted,
+        date: todayKey,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Habit update failed.";
+
+      console.error(
+        "Habit and reset update failed:",
+        message
+      );
+
+      setCompletedMap((current) => ({
+        ...current,
+        [habit.id]:
+          previousCompleted,
+      }));
+
+      setSaveSuccess(null);
+      setSaveError(message);
+      setFailedHabit(habit);
+    } finally {
+      pendingHabitIdsRef.current.delete(
+        habit.id
+      );
+      setPendingHabitIds((current) => {
+        const next = new Set(current);
+        next.delete(habit.id);
+        return next;
+      });
+    }
   }
 
-  function toggleDayLock() {
+  async function toggleDayLock() {
+    if (isLockPending) {
+      return;
+    }
+
     const nextLocked = !isLocked;
 
     if (nextLocked && !hasResetRecord) {
@@ -308,39 +957,158 @@ export function ResetDashboard({
 
     setLockError(null);
     setSaveError(null);
+    setIsLockPending(true);
 
-    startLockTransition(async () => {
-      const { data: rawData, error } = await supabase
-        .rpc("set_daily_reset_lock", {
-          target_date: getTodayKey(timeZone),
-          target_locked: nextLocked,
-        })
-        .single();
+    try {
+      const { data: rawData, error } =
+        await supabase
+          .rpc("set_daily_reset_lock", {
+            target_date: todayKey,
+            target_locked: nextLocked,
+          })
+          .single();
 
       if (error) {
-        console.error(
-          "Daily reset lock update failed:",
-          error.message
-        );
-        setLockError(error.message);
-        return;
+        throw error;
       }
 
       if (!rawData) {
-        setLockError(
+        throw new Error(
           "Lock status changed, but no updated record was returned."
         );
-        return;
       }
 
       const data =
         rawData as unknown as ResetLockRow;
 
-      setIsLocked(Boolean(data.lock_state));
+      setIsLocked(
+        Boolean(data.lock_state)
+      );
       setLockedAt(data.lock_timestamp);
       setHasResetRecord(true);
-    });
+      showSaveSuccess(
+        data.lock_state
+          ? "Today locked."
+          : "Today unlocked."
+      );
+      setAnalyticsDirty(true);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Daily reset lock update failed.";
+
+      console.error(
+        "Daily reset lock update failed:",
+        message
+      );
+      setLockError(message);
+    } finally {
+      if (isMountedRef.current) {
+        setIsLockPending(false);
+      }
+    }
   }
+
+  const systemStatus = useMemo<{
+    tone: SystemStatusTone;
+    message: string;
+  }>(() => {
+    if (saveError) {
+      return {
+        tone: "error",
+        message: `Sync failed: ${saveError}`,
+      };
+    }
+
+    if (syncMessage) {
+      return {
+        tone: "error",
+        message: syncMessage,
+      };
+    }
+
+    if (!isOnline) {
+      return {
+        tone: "warning",
+        message:
+          "Browser reports offline. Changes will be attempted, but syncing may fail.",
+      };
+    }
+
+    if (pendingHabitIds.size > 0) {
+      return {
+        tone: "saving",
+        message: `Saving ${
+          pendingHabitIds.size
+        } habit signal${
+          pendingHabitIds.size === 1
+            ? ""
+            : "s"
+        }...`,
+      };
+    }
+
+    if (isLockPending) {
+      return {
+        tone: "saving",
+        message: "Updating day lock...",
+      };
+    }
+
+    if (saveSuccess) {
+      return {
+        tone: "success",
+        message: saveSuccess,
+      };
+    }
+
+    if (isSyncing) {
+      return {
+        tone: "saving",
+        message: "Refreshing activity data...",
+      };
+    }
+
+    if (
+      realtimeStatus ===
+      "connecting"
+    ) {
+      return {
+        tone: "saving",
+        message:
+          "Connecting cross-device sync...",
+      };
+    }
+
+    if (
+      realtimeStatus ===
+      "degraded"
+    ) {
+      return {
+        tone: "warning",
+        message:
+          "Cross-device sync is unavailable. Local saves and focus refresh remain active.",
+      };
+    }
+
+    return {
+      tone: "ready",
+      message: analyticsDirty
+        ? "Signals synced. Historical reports can be refreshed below."
+        : "All signals synced. Realtime online.",
+    };
+  }, [
+    isLockPending,
+    isOnline,
+    isSyncing,
+    pendingHabitIds.size,
+    saveError,
+    saveSuccess,
+    syncMessage,
+    analyticsDirty,
+    realtimeStatus,
+  ]);
 
   return (
     <div className="p-3 sm:p-4 md:p-6">
@@ -351,29 +1119,40 @@ export function ResetDashboard({
         }
       />
 
-      <div className="mt-3 flex min-h-[34px] flex-wrap items-center justify-between gap-2 border border-[#242424] bg-[#050505] px-3 py-2 text-[11px]">
-        <span className={syncMessage ? "text-[#ffb020]" : "terminal-muted"}>
-          &gt; {syncMessage ?? (isSyncing ? "syncing activity data..." : "activity sync online")}
-        </span>
-        <button
-          type="button"
-          onClick={() => void refreshHabitLogs()}
-          disabled={isSyncing}
-          className="min-h-[32px] border border-[#242424] px-2 text-[#39ff88] transition hover:border-[#39ff88] disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {isSyncing ? "syncing..." : "refresh"}
-        </button>
-      </div>
+      <SystemStatus
+        tone={systemStatus.tone}
+        message={systemStatus.message}
+        retryLabel={
+          saveError && failedHabit
+            ? `retry ${failedHabit.name}`
+            : null
+        }
+        retrying={
+          failedHabit
+            ? pendingHabitIds.has(
+                failedHabit.id
+              )
+            : false
+        }
+        onRetry={
+          failedHabit
+            ? () =>
+                void toggleHabit(
+                  failedHabit
+                )
+            : undefined
+        }
+      />
 
       <CommandCenter
         resetScore={progress.resetScore}
         currentStreak={currentStreak}
         morningProgress={progress.morning}
         nightProgress={progress.night}
-        todayProtein={todayProtein}
+        todayProtein={liveTodayProtein}
         proteinTarget={proteinTarget}
-        latestWeight={latestWeight}
-        weightUnit={weightUnit}
+        latestWeight={liveLatestWeight}
+        weightUnit={liveWeightUnit}
         activeGoalCount={activeGoalCount}
       />
 
@@ -447,7 +1226,8 @@ export function ResetDashboard({
 
         <div className="space-y-4">
           <TerminalBlock title="quick.actions">
-            <JumpButton
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+              <JumpButton
               label="run morning_reset.exe"
               targetId="morning"
             />
@@ -487,22 +1267,24 @@ export function ResetDashboard({
               label="open ai_reflection"
               targetId="ai-reflection"
             />
-            <JumpButton
-              label="confirm sleep_boundary"
-              targetId="trust_based"
-            />
+              <JumpButton
+                label="confirm sleep_boundary"
+                targetId="trust_based"
+              />
+            </div>
           </TerminalBlock>
 
         </div>
       </div>
 
-      <div className="mt-4 grid gap-3 sm:gap-4 lg:grid-cols-4">
+      <div className="mt-4 grid gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Checklist
           id="morning"
           title={routineLabels.morning}
           displayTitle={routineTitles.morning}
           items={grouped.morning}
           completedMap={completedMap}
+          pendingHabitIds={pendingHabitIds}
           onToggle={toggleHabit}
           locked={isLocked}
         />
@@ -513,6 +1295,7 @@ export function ResetDashboard({
           displayTitle={routineTitles.daily}
           items={grouped.daily}
           completedMap={completedMap}
+          pendingHabitIds={pendingHabitIds}
           onToggle={toggleHabit}
           locked={isLocked}
         />
@@ -523,6 +1306,7 @@ export function ResetDashboard({
           displayTitle={routineTitles.night}
           items={grouped.night}
           completedMap={completedMap}
+          pendingHabitIds={pendingHabitIds}
           onToggle={toggleHabit}
           locked={isLocked}
         />
@@ -533,6 +1317,7 @@ export function ResetDashboard({
           displayTitle={routineTitles.trust_based}
           items={grouped.trust_based}
           completedMap={completedMap}
+          pendingHabitIds={pendingHabitIds}
           onToggle={toggleHabit}
           locked={isLocked}
         />
@@ -565,7 +1350,10 @@ export function ResetDashboard({
           </div>
 
           {lockedAt ? (
-            <p className="terminal-muted mt-3 text-xs leading-6">
+            <p
+              id="day-lock-help"
+              className="terminal-muted mt-3 text-xs leading-6"
+            >
               &gt; Locked{" "}
               {formatLockTimestamp(
                 lockedAt,
@@ -573,7 +1361,10 @@ export function ResetDashboard({
               )}.
             </p>
           ) : (
-            <p className="terminal-muted mt-3 text-xs leading-6">
+            <p
+              id="day-lock-help"
+              className="terminal-muted mt-3 text-xs leading-6"
+            >
               &gt; Lock today after the final protocol update.
               Unlocking restores checklist editing.
             </p>
@@ -582,15 +1373,17 @@ export function ResetDashboard({
           <button
             type="button"
             onClick={toggleDayLock}
+            aria-busy={isLockPending}
+            aria-describedby="day-lock-help"
             disabled={
-              isPending ||
+              pendingHabitIds.size > 0 ||
               isLockPending ||
               (!hasResetRecord && !isLocked)
             }
             className={
               isLocked
-                ? "mt-3 min-h-[48px] w-full border border-[#ffb020] bg-[#080808] px-3 py-3 text-left text-xs text-[#ffb020] transition hover:bg-[#0d0d0d] disabled:cursor-not-allowed disabled:opacity-50"
-                : "mt-3 min-h-[48px] w-full border border-[#39ff88] bg-[#080808] px-3 py-3 text-left text-xs text-[#39ff88] transition hover:bg-[#0d0d0d] disabled:cursor-not-allowed disabled:opacity-50"
+                ? "mt-3 min-h-[48px] w-full border border-[#ffb020] bg-[#080808] px-3 py-3 text-left text-xs text-[#ffb020] transition hover:bg-[#0d0d0d] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#39ff88] focus-visible:ring-inset disabled:cursor-default disabled:opacity-50"
+                : "mt-3 min-h-[48px] w-full border border-[#39ff88] bg-[#080808] px-3 py-3 text-left text-xs text-[#39ff88] transition hover:bg-[#0d0d0d] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#39ff88] focus-visible:ring-inset disabled:cursor-default disabled:opacity-50"
             }
           >
             &gt;{" "}
@@ -609,37 +1402,94 @@ export function ResetDashboard({
         </TerminalBlock>
       </div>
 
-      <div className="terminal-muted mt-6 border-t border-[#242424] pt-4 text-xs leading-6">
-        <p>&gt; Habit engine online.</p>
-        <p>
-          &gt; Routine score history synced to Supabase.
-        </p>
-        <p>&gt; User authenticated.</p>
-      </div>
-
-      <div className="mt-4">
-        <TerminalBlock title="save.status">
-          <p
-            className={
-              saveError
-                ? "text-[#ff4d4d]"
-                : isPending
-                  ? "text-[#ffb020]"
-                  : "terminal-green"
-            }
-          >
-            {saveError
-              ? `> Sync failed: ${saveError}`
-              : isPending
-                ? "> Saving habit + routine scores..."
-                : "> All signals synced to Supabase."}
+      <footer className="terminal-muted mt-6 border-t border-[#242424] pt-4 text-[11px] leading-5">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+          <p>&gt; habit_engine: online</p>
+          <p>
+            &gt; realtime:{" "}
+            {realtimeStatus.toUpperCase()}
           </p>
 
-          <p className="terminal-muted mt-2 break-all text-xs">
+          {analyticsDirty ? (
+            <button
+              type="button"
+              onClick={() =>
+                window.location.reload()
+              }
+              className="min-h-[36px] border border-[#5a4218] px-3 text-left text-[#ffb020] transition hover:border-[#ffb020] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#ffb020] focus-visible:ring-inset"
+            >
+              refresh historical reports
+            </button>
+          ) : (
+            <p>&gt; reports: current</p>
+          )}
+
+          <p className="break-all">
             &gt; session: {userEmail}
           </p>
-        </TerminalBlock>
-      </div>
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+function SystemStatus({
+  tone,
+  message,
+  retryLabel,
+  retrying,
+  onRetry,
+}: {
+  tone: SystemStatusTone;
+  message: string;
+  retryLabel: string | null;
+  retrying: boolean;
+  onRetry?: () => void;
+}) {
+  const toneClass: Record<
+    SystemStatusTone,
+    string
+  > = {
+    ready:
+      "border-[#242424] bg-[#050505] text-[#a3a3a3]",
+    saving:
+      "border-[#5a4218] bg-[#120d04] text-[#ffb020]",
+    success:
+      "border-[#1f4b32] bg-[#041008] text-[#39ff88]",
+    warning:
+      "border-[#5a4218] bg-[#120d04] text-[#ffb020]",
+    error:
+      "border-[#5a1f1f] bg-[#120404] text-[#ff6b6b]",
+  };
+
+  const isAlert =
+    tone === "error" ||
+    tone === "warning";
+
+  return (
+    <div
+      role={isAlert ? "alert" : "status"}
+      aria-live={
+        isAlert ? "assertive" : "polite"
+      }
+      className={`mt-3 flex min-h-[44px] flex-col justify-center gap-2 border px-3 py-2 text-[11px] sm:flex-row sm:items-center sm:justify-between ${toneClass[tone]}`}
+    >
+      <p className="min-w-0 break-words">
+        &gt; {message}
+      </p>
+
+      {retryLabel && onRetry ? (
+        <button
+          type="button"
+          onClick={onRetry}
+          disabled={retrying}
+          className="min-h-[34px] shrink-0 border border-current px-3 text-left transition hover:bg-white/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-current focus-visible:ring-inset disabled:cursor-default disabled:opacity-50"
+        >
+          {retrying
+            ? "retrying..."
+            : retryLabel}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -684,7 +1534,7 @@ function CommandCenter({
         </p>
       </div>
 
-      <div className="grid gap-px bg-[#242424] sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-px bg-[#242424] sm:grid-cols-2 xl:grid-cols-4">
         <CommandSignal
           label="TODAY RESET"
           value={`${resetScore}%`}
@@ -761,12 +1611,22 @@ function CommandSignal({
       <p className="terminal-muted text-[10px] uppercase tracking-[0.16em]">
         {label}
       </p>
-      <p className="terminal-green mt-2 text-lg">
+      <p className="terminal-green mt-2 text-lg tabular-nums">
         {value}
       </p>
 
       {typeof progress === "number" ? (
-        <div className="mt-2 h-1 overflow-hidden bg-[#121212]">
+        <div
+          className="mt-2 h-1 overflow-hidden bg-[#121212]"
+          role="progressbar"
+          aria-label={label}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.max(
+            0,
+            Math.min(100, progress)
+          )}
+        >
           <div
             className="h-full bg-[#39ff88]"
             style={{
@@ -847,7 +1707,7 @@ function JumpButton({
             block: "start",
           });
       }}
-      className="mb-2 block min-h-[46px] w-full border border-[#242424] bg-[#080808] px-3 py-3 text-left text-xs text-[#39ff88] transition hover:border-[#39ff88] hover:bg-[#0d0d0d]"
+      className="block min-h-[46px] w-full border border-[#242424] bg-[#080808] px-3 py-3 text-left text-xs text-[#39ff88] transition hover:border-[#39ff88] hover:bg-[#0d0d0d] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#39ff88] focus-visible:ring-inset"
     >
       &gt; {label}
     </button>
@@ -860,6 +1720,7 @@ function Checklist({
   displayTitle,
   items,
   completedMap,
+  pendingHabitIds,
   onToggle,
   locked,
 }: {
@@ -868,9 +1729,20 @@ function Checklist({
   displayTitle: string;
   items: Habit[];
   completedMap: Record<string, boolean>;
+  pendingHabitIds: Set<string>;
   onToggle: (habit: Habit) => void;
   locked: boolean;
 }) {
+  const completedCount = items.reduce(
+    (
+      count: number,
+      item: Habit
+    ) =>
+      count +
+      (completedMap[item.id] ? 1 : 0),
+    0
+  );
+
   const groupedByCategory = items.reduce<
     Record<string, Habit[]>
   >((accumulator, item) => {
@@ -885,15 +1757,30 @@ function Checklist({
   return (
     <section
       id={id}
-      className="border border-[#242424] bg-[#050505]"
+      className="scroll-mt-4 border border-[#242424] bg-[#050505]"
+      aria-labelledby={`${id}-title`}
     >
       <div className="border-b border-[#242424] bg-[#0d0d0d] px-3 py-2">
-        <p className="terminal-green text-xs uppercase tracking-[0.2em]">
-          &gt; {title}
-        </p>
-        <p className="terminal-muted mt-1 text-xs">
-          {displayTitle}
-        </p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p
+              id={`${id}-title`}
+              className="terminal-green text-xs uppercase tracking-[0.2em]"
+            >
+              &gt; {title}
+            </p>
+            <p className="terminal-muted mt-1 text-xs">
+              {displayTitle}
+            </p>
+          </div>
+
+          <span
+            className="shrink-0 border border-[#242424] px-2 py-1 text-[10px] tabular-nums text-[#a3a3a3]"
+            aria-label={`${completedCount} of ${items.length} complete`}
+          >
+            {completedCount}/{items.length}
+          </span>
+        </div>
       </div>
 
       <div className="max-h-none overflow-y-visible p-3 sm:max-h-[520px] sm:overflow-y-auto">
@@ -911,14 +1798,28 @@ function Checklist({
                 const completed = Boolean(
                   completedMap[item.id]
                 );
+                const isSaving =
+                  pendingHabitIds.has(item.id);
 
                 return (
                   <button
                     type="button"
                     key={item.id}
                     onClick={() => onToggle(item)}
-                    disabled={locked}
-                    className="terminal-line grid min-h-[48px] w-full grid-cols-[28px_34px_1fr] items-center gap-2 py-2 text-left text-xs transition hover:text-[#39ff88] disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:text-inherit sm:grid-cols-[32px_36px_1fr]"
+                    disabled={locked || isSaving}
+                    aria-busy={isSaving}
+                    aria-pressed={completed}
+                    aria-label={`${
+                      completed
+                        ? "Mark incomplete"
+                        : "Mark complete"
+                    }: ${item.name}`}
+                    title={
+                      locked
+                        ? "Unlock today to edit this protocol."
+                        : undefined
+                    }
+                    className="terminal-line grid min-h-[52px] w-full grid-cols-[28px_34px_1fr] items-center gap-2 py-2.5 text-left text-xs transition hover:text-[#39ff88] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#39ff88] focus-visible:ring-inset disabled:cursor-default disabled:opacity-55 disabled:hover:text-inherit sm:grid-cols-[32px_36px_1fr]"
                   >
                     <span className="terminal-dim leading-6">
                       {String(index + 1).padStart(
@@ -928,7 +1829,11 @@ function Checklist({
                     </span>
 
                     <span className="terminal-green whitespace-nowrap leading-6">
-                      {completed ? "[✓]" : "[ ]"}
+                      {isSaving
+                        ? "[…]"
+                        : completed
+                          ? "[✓]"
+                          : "[ ]"}
                     </span>
 
                     <span
@@ -986,7 +1891,7 @@ function TerminalRow({
   green?: boolean;
 }) {
   return (
-    <div className="terminal-line flex items-center justify-between gap-4 py-2">
+    <div className="terminal-line flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2">
       <span className="terminal-muted text-xs">
         {label}
       </span>
@@ -1014,7 +1919,7 @@ function ProtocolLine({
 }) {
   return (
     <div className="terminal-line py-2">
-      <div className="mb-1 flex items-center justify-between gap-4">
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
         <span>
           [{status === "COMPLETE" ? "✓" : " "}]{" "}
           {name}
@@ -1024,7 +1929,14 @@ function ProtocolLine({
         </span>
       </div>
 
-      <div className="h-1 overflow-hidden bg-[#121212]">
+      <div
+        className="h-1 overflow-hidden bg-[#121212]"
+        role="progressbar"
+        aria-label={`${name} progress`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={progress}
+      >
         <div
           className="h-full bg-[#39ff88] transition-all"
           style={{ width: `${progress}%` }}

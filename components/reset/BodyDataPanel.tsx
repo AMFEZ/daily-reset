@@ -6,6 +6,7 @@ import {
   useTransition,
 } from "react";
 import { SignalDisclosure } from "@/components/reset/SignalDisclosure";
+import { SignalEntryDisclosure } from "@/components/reset/SignalEntryDisclosure";
 
 type WeightUnit = "lbs" | "kg";
 
@@ -278,22 +279,29 @@ export function BodyDataPanel({
             {sortedLogs.length > 0 ? (
               sortedLogs.map(
                 (log, index) => (
-                  <div
+                  <SignalEntryDisclosure
                     key={`${log.id}-${log.date}-${index}`}
-                    className="terminal-line grid gap-2 px-3 py-3 text-xs sm:grid-cols-[110px_100px_1fr]"
+                    title={`${log.weight} ${log.unit}`}
+                    meta={log.date}
+                    preview={
+                      log.note ??
+                      "Body signal"
+                    }
                   >
-                    <span className="terminal-muted">
-                      {log.date}
-                    </span>
-                    <span className="terminal-green">
-                      {log.weight}{" "}
-                      {log.unit}
-                    </span>
-                    <span className="terminal-muted">
-                      {log.note ??
-                        "Body signal"}
-                    </span>
-                  </div>
+                    <div className="grid gap-2 sm:grid-cols-[110px_100px_1fr]">
+                      <span className="terminal-muted">
+                        {log.date}
+                      </span>
+                      <span className="terminal-green">
+                        {log.weight}{" "}
+                        {log.unit}
+                      </span>
+                      <span className="terminal-muted">
+                        {log.note ??
+                          "Body signal"}
+                      </span>
+                    </div>
+                  </SignalEntryDisclosure>
                 )
               )
             ) : (

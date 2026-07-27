@@ -92,6 +92,7 @@ export function DataSafetyPanel() {
   ] = useTransition();
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Hydrate browser-only export metadata after mount.
     setLastExportAt(
       window.localStorage.getItem(
         LAST_EXPORT_KEY

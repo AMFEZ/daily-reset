@@ -8,6 +8,8 @@ import {
 } from "react";
 import { ContextAudioRecorder } from "@/components/reset/ContextAudioRecorder";
 import { SignalDisclosure } from "@/components/reset/SignalDisclosure";
+import { SignalEntryDisclosure } from "@/components/reset/SignalEntryDisclosure";
+import { completeActivityHabit } from "@/lib/completeActivityHabit";
 import { createClient } from "@/utils/supabase/client";
 
 type DreamEntry = {
@@ -123,6 +125,10 @@ export function DreamArchivePanel({
   ] = useState<string | null>(null);
   const [message, setMessage] =
     useState<string | null>(null);
+  const [lastSavedDreamId, setLastSavedDreamId] =
+    useState<string | null>(null);
+  const [lastSavedAudioPath, setLastSavedAudioPath] =
+    useState<string | null>(null);
 
   const sortedEntries = useMemo(
     () =>
@@ -184,11 +190,11 @@ export function DreamArchivePanel({
         await supabase
           .rpc("add_dream_entry", {
             target_title:
-              title.trim() || null,
+              title.trim(),
             target_content:
               cleanContent,
-            target_mood: null,
-            target_emotion: null,
+            target_mood: "",
+            target_emotion: "",
             target_symbols:
               parseList(symbols),
             target_people:
@@ -197,11 +203,11 @@ export function DreamArchivePanel({
               parseList(places),
             target_tags: [],
             target_audio_path:
-              audioPath,
+              audioPath ?? "",
             target_raw_transcript:
-              cleanRaw || null,
+              cleanRaw,
             target_cleaned_transcript:
-              cleanCleaned || null,
+              cleanCleaned,
           })
           .single();
 
@@ -222,26 +228,33 @@ export function DreamArchivePanel({
       const data =
         rawData as unknown as SavedDreamEntryRow;
 
+      const persistedAudioPath =
+        data.log_audio_path || audioPath || null;
+
+      const savedEntry: DreamEntry = {
+        id: data.log_id,
+        entry_type: "dream",
+        title: data.log_title,
+        content: data.log_content,
+        mood: null,
+        energy: data.log_energy,
+        tags: [],
+        audio_path: persistedAudioPath,
+        raw_transcript:
+          data.log_raw_transcript,
+        cleaned_transcript:
+          data.log_cleaned_transcript,
+        created_at: data.log_created_at,
+      };
+
       setEntries((current) => [
-        {
-          id: data.log_id,
-          entry_type: "dream",
-          title: data.log_title,
-          content: data.log_content,
-          mood: null,
-          energy: data.log_energy,
-          tags: [],
-          audio_path:
-            data.log_audio_path,
-          raw_transcript:
-            data.log_raw_transcript,
-          cleaned_transcript:
-            data.log_cleaned_transcript,
-          created_at:
-            data.log_created_at,
-        },
+        savedEntry,
         ...current,
       ]);
+      setLastSavedDreamId(savedEntry.id);
+      setLastSavedAudioPath(
+        savedEntry.audio_path
+      );
 
       setTitle("");
       setContent("");
@@ -252,14 +265,32 @@ export function DreamArchivePanel({
       setAudioPreviewUrl(null);
       setRawTranscript("");
       setCleanedTranscript("");
-      setMessage(
-        "Dream signal archived."
-      );
+      try {
+        const matchedHabit =
+          await completeActivityHabit({
+            activity: "dream",
+            date: getLocalDateKey(),
+          });
+
+        setMessage(
+          `Dream signal archived. ${matchedHabit.name} completed.`
+        );
+      } catch (syncError) {
+        setMessage(
+          syncError instanceof Error
+            ? `Dream saved, but habit sync failed: ${syncError.message}`
+            : "Dream saved, but the dream habit could not be completed."
+        );
+      }
     });
   }
 
   async function transcribeDream(
-    entry: DreamEntry
+    entry: Pick<
+      DreamEntry,
+      "id" | "audio_path"
+    >,
+    syncTranscriptEditor = false
   ) {
     if (!entry.audio_path) {
       setMessage(
@@ -318,6 +349,15 @@ export function DreamArchivePanel({
             : candidate
         )
       );
+
+      if (syncTranscriptEditor) {
+        setRawTranscript(
+          result.rawTranscript
+        );
+        setCleanedTranscript(
+          result.cleanedTranscript
+        );
+      }
 
       setMessage(
         "Dream audio transcribed."
@@ -476,6 +516,39 @@ export function DreamArchivePanel({
               setAudioPreviewUrl(
                 previewUrl
               );
+              setLastSavedDreamId(null);
+              setLastSavedAudioPath(null);
+            }}
+            savedDreamId={
+              lastSavedDreamId
+            }
+            savedAudioPath={
+              lastSavedAudioPath
+            }
+            isTranscribing={
+              Boolean(lastSavedDreamId) &&
+              transcribingEntryId ===
+                lastSavedDreamId
+            }
+            onTranscribe={async () => {
+              if (
+                !lastSavedDreamId ||
+                !lastSavedAudioPath
+              ) {
+                setMessage(
+                  "Save the recorded dream before transcribing it."
+                );
+                return;
+              }
+
+              await transcribeDream(
+                {
+                  id: lastSavedDreamId,
+                  audio_path:
+                    lastSavedAudioPath,
+                },
+                true
+              );
             }}
           />
 
@@ -565,57 +638,49 @@ export function DreamArchivePanel({
             {sortedEntries.length > 0 ? (
               sortedEntries.map(
                 (entry, index) => {
-                  const created =
-                    new Date(
-                      entry.created_at
-                    );
+                  const created = new Date(
+                    entry.created_at
+                  );
                   const interpretation =
                     interpretationByEntry[
                       entry.id
                     ];
+                  const preview =
+                    entry.content ||
+                    entry.cleaned_transcript ||
+                    entry.raw_transcript ||
+                    "Audio-only dream signal.";
+                  const timestamp = `${created.toLocaleDateString()} ${created.toLocaleTimeString(
+                    [],
+                    {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    }
+                  )}`;
 
                   return (
-                    <article
+                    <SignalEntryDisclosure
                       key={`${entry.id}-${entry.created_at}-${index}`}
-                      className="terminal-line p-3 text-xs"
+                      title={
+                        entry.title ||
+                        "Untitled Dream"
+                      }
+                      meta={timestamp}
+                      preview={preview}
                     >
-                      <div className="mb-2 flex flex-wrap justify-between gap-2">
-                        <span className="terminal-green">
-                          {entry.title ||
-                            "Untitled Dream"}
-                        </span>
-                        <span className="terminal-muted">
-                          {created.toLocaleDateString()}{" "}
-                          {created.toLocaleTimeString(
-                            [],
-                            {
-                              hour: "2-digit",
-                              minute:
-                                "2-digit",
-                            }
-                          )}
-                        </span>
-                      </div>
-
                       <p className="whitespace-pre-wrap leading-6">
-                        {entry.content ||
-                          entry.cleaned_transcript ||
-                          entry.raw_transcript ||
-                          "Audio-only dream signal."}
+                        {preview}
                       </p>
 
                       {entry.audio_path ? (
                         <div className="mt-3 border border-[#242424] bg-[#030303] p-3">
                           <p className="terminal-green break-all">
-                            audio:{" "}
-                            {entry.audio_path}
+                            audio: {entry.audio_path}
                           </p>
                           <button
                             type="button"
                             onClick={() =>
-                              transcribeDream(
-                                entry
-                              )
+                              transcribeDream(entry)
                             }
                             disabled={
                               transcribingEntryId ===
@@ -653,9 +718,7 @@ export function DreamArchivePanel({
                       </button>
 
                       <TranscriptView
-                        raw={
-                          entry.raw_transcript
-                        }
+                        raw={entry.raw_transcript}
                         cleaned={
                           entry.cleaned_transcript
                         }
@@ -668,7 +731,7 @@ export function DreamArchivePanel({
                           }
                         />
                       ) : null}
-                    </article>
+                    </SignalEntryDisclosure>
                   );
                 }
               )
@@ -863,4 +926,18 @@ function TerminalBlock({
       <div className="p-3">{children}</div>
     </section>
   );
+}
+
+
+function getLocalDateKey() {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(
+    date.getMonth() + 1
+  ).padStart(2, "0");
+  const day = String(
+    date.getDate()
+  ).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
 }

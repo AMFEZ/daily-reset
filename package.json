@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "types:generate": "node scripts/generate-database-types.mjs",
+    "types:check": "npm run types:generate && git diff --exit-code -- types/database.types.ts",
+    "release:check": "node scripts/release-readiness.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.1",
@@ -25,6 +28,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
+    "supabase": "^2.109.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

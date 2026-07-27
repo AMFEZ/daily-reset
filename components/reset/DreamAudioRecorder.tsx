@@ -4,29 +4,55 @@ import { useRef, useState } from "react";
 import { createClient } from "@/utils/supabase/client";
 
 type DreamAudioRecorderProps = {
-  onAudioUploaded: (audioPath: string, previewUrl: string) => void;
+  onAudioUploaded: (
+    audioPath: string,
+    previewUrl: string
+  ) => void;
+  savedDreamId: string | null;
+  savedAudioPath: string | null;
+  isTranscribing: boolean;
+  onTranscribe?: () => void | Promise<void>;
 };
 
 export function DreamAudioRecorder({
   onAudioUploaded,
+  savedDreamId,
+  savedAudioPath,
+  isTranscribing,
+  onTranscribe,
 }: DreamAudioRecorderProps) {
   const supabase = createClient();
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaRecorderRef =
+    useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
 
-  const [isRecording, setIsRecording] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const [isRecording, setIsRecording] =
+    useState(false);
+  const [isUploading, setIsUploading] =
+    useState(false);
+  const [previewUrl, setPreviewUrl] =
+    useState<string | null>(null);
+  const [message, setMessage] =
+    useState<string | null>(null);
+
+  const supportsTranscription =
+    typeof onTranscribe === "function";
+
+  const canTranscribe = Boolean(
+    supportsTranscription &&
+      savedDreamId &&
+      savedAudioPath
+  );
 
   async function startRecording() {
     setMessage(null);
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-      });
+      const stream =
+        await navigator.mediaDevices.getUserMedia({
+          audio: true,
+        });
 
       chunksRef.current = [];
 
@@ -43,14 +69,20 @@ export function DreamAudioRecorder({
       };
 
       recorder.onstop = async () => {
-        const audioBlob = new Blob(chunksRef.current, {
-          type: "audio/webm",
-        });
+        const audioBlob = new Blob(
+          chunksRef.current,
+          {
+            type: "audio/webm",
+          }
+        );
 
-        const localUrl = URL.createObjectURL(audioBlob);
+        const localUrl =
+          URL.createObjectURL(audioBlob);
         setPreviewUrl(localUrl);
 
-        stream.getTracks().forEach((track) => track.stop());
+        stream
+          .getTracks()
+          .forEach((track) => track.stop());
 
         await uploadAudio(audioBlob, localUrl);
       };
@@ -69,10 +101,15 @@ export function DreamAudioRecorder({
 
     mediaRecorderRef.current.stop();
     setIsRecording(false);
-    setMessage("Recording stopped. Uploading audio...");
+    setMessage(
+      "Recording stopped. Uploading audio..."
+    );
   }
 
-  async function uploadAudio(audioBlob: Blob, localPreviewUrl: string) {
+  async function uploadAudio(
+    audioBlob: Blob,
+    localPreviewUrl: string
+  ) {
     setIsUploading(true);
 
     const {
@@ -81,29 +118,39 @@ export function DreamAudioRecorder({
     } = await supabase.auth.getUser();
 
     if (userError || !user) {
-      setMessage("Upload failed: user not authenticated.");
+      setMessage(
+        "Upload failed: user not authenticated."
+      );
       setIsUploading(false);
       return;
     }
 
     const filePath = `${user.id}/${Date.now()}-dream.webm`;
 
-    const { error: uploadError } = await supabase.storage
-      .from("dream-audio")
-      .upload(filePath, audioBlob, {
-        contentType: "audio/webm",
-        upsert: false,
-      });
+    const { error: uploadError } =
+      await supabase.storage
+        .from("dream-audio")
+        .upload(filePath, audioBlob, {
+          contentType: "audio/webm",
+          upsert: false,
+        });
 
     if (uploadError) {
-      console.error("Dream audio upload failed:", uploadError.message);
-      setMessage(`Upload failed: ${uploadError.message}`);
+      console.error(
+        "Dream audio upload failed:",
+        uploadError.message
+      );
+      setMessage(
+        `Upload failed: ${uploadError.message}`
+      );
       setIsUploading(false);
       return;
     }
 
     onAudioUploaded(filePath, localPreviewUrl);
-    setMessage("Dream audio uploaded.");
+    setMessage(
+      "Dream audio uploaded. Save the dream to unlock transcription."
+    );
     setIsUploading(false);
   }
 
@@ -114,37 +161,61 @@ export function DreamAudioRecorder({
       </p>
 
       <p className="terminal-muted text-xs leading-6">
-        &gt; Speak messy. Details matter. Speech-to-text comes in the next
-        build.
+        &gt; Record the dream, save it, then run
+        speech-to-text.
       </p>
 
-      <div className="mt-3 grid gap-2 md:grid-cols-2">
+      <div
+        className={[
+          "mt-3 grid gap-2",
+          supportsTranscription
+            ? "md:grid-cols-2"
+            : "grid-cols-1",
+        ].join(" ")}
+      >
         {!isRecording ? (
           <button
             type="button"
             onClick={startRecording}
-            disabled={isUploading}
+            disabled={isUploading || isTranscribing}
             className="min-h-[64px] whitespace-normal break-words border border-[#39ff88] bg-[#000000] px-4 py-3 text-left text-sm leading-6 text-[#39ff88] transition hover:bg-[#050505] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            &gt; start_recording
+            &gt;{" "}
+            {isUploading
+              ? "uploading_audio..."
+              : "start_recording"}
           </button>
         ) : (
           <button
             type="button"
             onClick={stopRecording}
-            className="border border-[#ff4d4d] bg-[#000000] px-4 py-3 text-left text-sm text-[#ff4d4d] transition hover:bg-[#050505]"
+            className="min-h-[64px] border border-[#ff4d4d] bg-[#000000] px-4 py-3 text-left text-sm text-[#ff4d4d] transition hover:bg-[#050505]"
           >
             &gt; stop_recording
           </button>
         )}
 
-        <button
-  type="button"
-  disabled
-  className="min-h-[64px] whitespace-normal break-words border border-[#242424] bg-[#000000] px-4 py-3 text-left text-sm leading-6 text-[#39ff88] opacity-50"
->
-  &gt; save first, then transcribe
-</button>
+        {supportsTranscription ? (
+          <button
+            type="button"
+            onClick={() => {
+              void onTranscribe?.();
+            }}
+            disabled={
+              !canTranscribe ||
+              isTranscribing ||
+              isUploading
+            }
+            className="min-h-[64px] whitespace-normal break-words border border-[#39ff88] bg-[#000000] px-4 py-3 text-left text-sm leading-6 text-[#39ff88] transition hover:bg-[#050505] disabled:cursor-not-allowed disabled:border-[#242424] disabled:opacity-50"
+          >
+            &gt;{" "}
+            {isTranscribing
+              ? "transcribing_dream..."
+              : canTranscribe
+                ? "speech_to_text"
+                : "save first, then transcribe"}
+          </button>
+        ) : null}
       </div>
 
       {previewUrl ? (
@@ -152,12 +223,18 @@ export function DreamAudioRecorder({
           <p className="terminal-muted mb-2 text-xs">
             &gt; Local playback preview:
           </p>
-          <audio controls src={previewUrl} className="w-full" />
+          <audio
+            controls
+            src={previewUrl}
+            className="w-full"
+          />
         </div>
       ) : null}
 
       {message ? (
-        <p className="mt-3 text-xs text-[#ffb020]">&gt; {message}</p>
+        <p className="mt-3 text-xs text-[#ffb020]">
+          &gt; {message}
+        </p>
       ) : null}
     </div>
   );

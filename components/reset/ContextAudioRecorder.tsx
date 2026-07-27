@@ -7,10 +7,18 @@ type ContextAudioRecorderProps = {
     path: string,
     previewUrl: string
   ) => void;
+  savedDreamId?: string | null;
+  savedAudioPath?: string | null;
+  isTranscribing?: boolean;
+  onTranscribe?: () => void | Promise<void>;
 };
 
 export function ContextAudioRecorder({
   onAudioUploaded,
+  savedDreamId = null,
+  savedAudioPath = null,
+  isTranscribing = false,
+  onTranscribe,
 }: ContextAudioRecorderProps) {
   return (
     <div
@@ -28,6 +36,10 @@ export function ContextAudioRecorder({
     >
       <DreamAudioRecorder
         onAudioUploaded={onAudioUploaded}
+        savedDreamId={savedDreamId}
+        savedAudioPath={savedAudioPath}
+        isTranscribing={isTranscribing}
+        onTranscribe={onTranscribe}
       />
     </div>
   );

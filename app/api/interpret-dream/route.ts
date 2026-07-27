@@ -27,17 +27,26 @@ export async function POST(request: Request) {
   try {
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json(
-        { error: "Missing OPENAI_API_KEY." },
-        { status: 500 }
+        {
+          error: "Missing OPENAI_API_KEY.",
+        },
+        {
+          status: 500,
+        }
       );
     }
 
-    const body = (await request.json()) as InterpretDreamBody;
+    const body =
+      (await request.json()) as InterpretDreamBody;
 
     if (!body.journalEntryId) {
       return NextResponse.json(
-        { error: "Missing journalEntryId." },
-        { status: 400 }
+        {
+          error: "Missing journalEntryId.",
+        },
+        {
+          status: 400,
+        }
       );
     }
 
@@ -50,12 +59,19 @@ export async function POST(request: Request) {
 
     if (userError || !user) {
       return NextResponse.json(
-        { error: "Not authenticated." },
-        { status: 401 }
+        {
+          error: "Not authenticated.",
+        },
+        {
+          status: 401,
+        }
       );
     }
 
-    const { data: entry, error: entryError } = await supabase
+    const {
+      data: entry,
+      error: entryError,
+    } = await supabase
       .from("journal_entries")
       .select(
         "id, user_id, entry_type, title, content, mood, tags, raw_transcript, cleaned_transcript"
@@ -67,8 +83,12 @@ export async function POST(request: Request) {
 
     if (entryError || !entry) {
       return NextResponse.json(
-        { error: "Dream entry not found." },
-        { status: 404 }
+        {
+          error: "Dream entry not found.",
+        },
+        {
+          status: 404,
+        }
       );
     }
 
@@ -80,24 +100,21 @@ export async function POST(request: Request) {
 
     if (dreamText.length < 2) {
       return NextResponse.json(
-        { error: "Dream has no text to interpret." },
-        { status: 400 }
+        {
+          error:
+            "Dream has no text to interpret.",
+        },
+        {
+          status: 400,
+        }
       );
     }
 
-    const model = process.env.OPENAI_TEXT_MODEL || "gpt-4o-mini";
+    const model =
+      process.env.OPENAI_TEXT_MODEL ||
+      "gpt-4o-mini";
 
-    const response = await openai.responses.create({
-      model,
-      input: [
-        {
-          role: "system",
-          content:
-            "You are a careful dream interpretation assistant for a private self-reflection journal. Interpret dreams as possibilities, not facts. Avoid certainty. Keep it grounded, emotionally safe, and non-graphic. Do not diagnose. Do not make predictions. Return valid JSON only.",
-        },
-        {
-          role: "user",
-          content: `
+    const interpretationPrompt = `
 Interpret this dream using the requested structure.
 
 Dream title:
@@ -107,7 +124,11 @@ Mood:
 ${entry.mood ?? "Unknown"}
 
 Tags:
-${Array.isArray(entry.tags) ? entry.tags.join(", ") : "None"}
+${
+  Array.isArray(entry.tags)
+    ? entry.tags.join(", ")
+    : "None"
+}
 
 Dream text:
 ${dreamText}
@@ -125,38 +146,85 @@ Return ONLY valid JSON with this exact shape:
   "action_step": "string",
   "interpretation_note": "string"
 }
-`,
-        },
-      ],
-    });
+`.trim();
 
-    const outputText = response.output_text?.trim() ?? "";
+    const response =
+      await openai.responses.create({
+        model,
+        input: [
+          {
+            role: "system",
+            content:
+              "You are a careful dream interpretation assistant for a private self-reflection journal. Interpret dreams as possibilities, not facts. Avoid certainty. Keep it grounded, emotionally safe, and non-graphic. Do not diagnose. Do not make predictions. Return valid JSON only.",
+          },
+          {
+            role: "user",
+            content:
+              interpretationPrompt,
+          },
+        ],
+      });
+
+    const outputText =
+      response.output_text?.trim() ?? "";
 
     if (!outputText) {
       return NextResponse.json(
-        { error: "Dream interpretation returned empty output." },
-        { status: 500 }
+        {
+          error:
+            "Dream interpretation returned empty output.",
+        },
+        {
+          status: 500,
+        }
       );
     }
 
-    const interpretation = parseDreamInterpretation(outputText);
+    const interpretation =
+      parseDreamInterpretation(
+        outputText
+      );
 
-    const { data: saved, error: saveError } = await supabase
+    const storedResponse =
+      JSON.stringify(
+        interpretation,
+        null,
+        2
+      );
+
+    const {
+      data: saved,
+      error: saveError,
+    } = await supabase
       .from("ai_reflections")
       .insert({
         user_id: user.id,
         journal_entry_id: entry.id,
         reflection_type: "dream",
-        summary: interpretation.summary,
-        emotional_themes: interpretation.emotional_themes,
-        pattern_noticed: interpretation.pattern_noticed,
-        jungian_lens: interpretation.jungian_lens,
-        freudian_lens: interpretation.freudian_lens,
-        neuroscience_lens: interpretation.neuroscience_lens,
-        compassionate_reframe: interpretation.compassionate_reframe,
-        questions: interpretation.questions,
-        action_step: interpretation.action_step,
-        interpretation_note: interpretation.interpretation_note,
+
+        prompt: interpretationPrompt,
+        response: storedResponse,
+
+        summary:
+          interpretation.summary,
+        emotional_themes:
+          interpretation.emotional_themes,
+        pattern_noticed:
+          interpretation.pattern_noticed,
+        jungian_lens:
+          interpretation.jungian_lens,
+        freudian_lens:
+          interpretation.freudian_lens,
+        neuroscience_lens:
+          interpretation.neuroscience_lens,
+        compassionate_reframe:
+          interpretation.compassionate_reframe,
+        questions:
+          interpretation.questions,
+        action_step:
+          interpretation.action_step,
+        interpretation_note:
+          interpretation.interpretation_note,
         model,
       })
       .select(
@@ -166,8 +234,14 @@ Return ONLY valid JSON with this exact shape:
 
     if (saveError || !saved) {
       return NextResponse.json(
-        { error: saveError?.message ?? "Interpretation save failed." },
-        { status: 500 }
+        {
+          error:
+            saveError?.message ??
+            "Interpretation save failed.",
+        },
+        {
+          status: 500,
+        }
       );
     }
 
@@ -175,38 +249,76 @@ Return ONLY valid JSON with this exact shape:
       interpretation: saved,
     });
   } catch (error) {
-    console.error("Dream interpretation failed:", error);
+    console.error(
+      "Dream interpretation failed:",
+      error
+    );
 
     return NextResponse.json(
-      { error: "Dream interpretation failed." },
-      { status: 500 }
+      {
+        error:
+          "Dream interpretation failed.",
+      },
+      {
+        status: 500,
+      }
     );
   }
 }
 
-function parseDreamInterpretation(raw: string): DreamInterpretationResult {
+function parseDreamInterpretation(
+  raw: string
+): DreamInterpretationResult {
   const cleaned = raw
     .replace(/^```json/i, "")
     .replace(/^```/i, "")
     .replace(/```$/i, "")
     .trim();
 
-  const parsed = JSON.parse(cleaned) as Partial<DreamInterpretationResult>;
+  const parsed =
+    JSON.parse(
+      cleaned
+    ) as Partial<DreamInterpretationResult>;
 
   return {
-    summary: String(parsed.summary ?? ""),
-    emotional_themes: Array.isArray(parsed.emotional_themes)
-      ? parsed.emotional_themes.map(String)
-      : [],
-    pattern_noticed: String(parsed.pattern_noticed ?? ""),
-    jungian_lens: String(parsed.jungian_lens ?? ""),
-    freudian_lens: String(parsed.freudian_lens ?? ""),
-    neuroscience_lens: String(parsed.neuroscience_lens ?? ""),
-    compassionate_reframe: String(parsed.compassionate_reframe ?? ""),
-    questions: Array.isArray(parsed.questions)
+    summary: String(
+      parsed.summary ?? ""
+    ),
+    emotional_themes:
+      Array.isArray(
+        parsed.emotional_themes
+      )
+        ? parsed.emotional_themes.map(
+            String
+          )
+        : [],
+    pattern_noticed: String(
+      parsed.pattern_noticed ?? ""
+    ),
+    jungian_lens: String(
+      parsed.jungian_lens ?? ""
+    ),
+    freudian_lens: String(
+      parsed.freudian_lens ?? ""
+    ),
+    neuroscience_lens: String(
+      parsed.neuroscience_lens ?? ""
+    ),
+    compassionate_reframe:
+      String(
+        parsed.compassionate_reframe ??
+          ""
+      ),
+    questions: Array.isArray(
+      parsed.questions
+    )
       ? parsed.questions.map(String)
       : [],
-    action_step: String(parsed.action_step ?? ""),
-    interpretation_note: String(parsed.interpretation_note ?? ""),
+    action_step: String(
+      parsed.action_step ?? ""
+    ),
+    interpretation_note: String(
+      parsed.interpretation_note ?? ""
+    ),
   };
 }

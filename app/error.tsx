@@ -6,9 +6,7 @@ export default function Error({
   error,
   reset,
 }: {
-  error: Error & {
-    digest?: string;
-  };
+  error: Error & { digest?: string };
   reset: () => void;
 }) {
   useEffect(() => {
@@ -19,38 +17,38 @@ export default function Error({
   }, [error]);
 
   return (
-    <main className="grid min-h-screen place-items-center bg-black p-3 text-sm text-[#e5e5e5]">
-      <section className="w-full max-w-2xl border border-[#ff6b6b] bg-[#050505]">
-        <div className="border-b border-[#242424] bg-[#0d0d0d] px-4 py-3">
-          <p className="text-xs uppercase tracking-[0.2em] text-[#ff6b6b]">
+    <main className="min-h-screen bg-black px-4 py-12 text-[#e5e5e5]">
+      <section className="mx-auto max-w-2xl border border-[#5a1f1f] bg-[#080404]">
+        <header className="border-b border-[#5a1f1f] px-4 py-3">
+          <p className="font-mono text-xs uppercase tracking-[0.2em] text-[#ff6b6b]">
             &gt; system.error
           </p>
-        </div>
+        </header>
 
-        <div className="p-4">
-          <p className="text-sm text-[#e5e5e5]">
-            Daily Reset could not finish loading.
-          </p>
+        <div className="space-y-4 p-4 font-mono">
+          <h1 className="text-lg text-[#ff6b6b]">
+            Daily Reset hit a recoverable error.
+          </h1>
 
-          <p className="terminal-muted mt-3 text-xs leading-6">
-            &gt; Your Supabase records were not
-            deleted. Retry the route, or reload the
-            app if the connection changed.
+          <p className="text-sm leading-6 text-[#a3a3a3]">
+            Your saved data has not been deleted.
+            Retry the current screen first. Reload
+            only if the problem continues.
           </p>
 
           {error.digest ? (
-            <p className="terminal-muted mt-3 break-all text-[10px]">
-              &gt; error digest: {error.digest}
+            <p className="break-all text-xs text-[#737373]">
+              &gt; error_id: {error.digest}
             </p>
           ) : null}
 
-          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
             <button
               type="button"
               onClick={reset}
-              className="min-h-[48px] border border-[#39ff88] bg-[#080808] px-4 py-3 text-left text-sm text-[#39ff88]"
+              className="min-h-[44px] border border-[#39ff88] px-4 text-left text-xs text-[#39ff88] transition hover:bg-[#041008] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#39ff88] focus-visible:ring-inset"
             >
-              &gt; retry_route
+              retry current screen
             </button>
 
             <button
@@ -58,9 +56,9 @@ export default function Error({
               onClick={() =>
                 window.location.reload()
               }
-              className="min-h-[48px] border border-[#242424] bg-[#080808] px-4 py-3 text-left text-sm text-[#e5e5e5]"
+              className="min-h-[44px] border border-[#242424] px-4 text-left text-xs text-[#a3a3a3] transition hover:border-[#e5e5e5] hover:text-[#e5e5e5] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#e5e5e5] focus-visible:ring-inset"
             >
-              &gt; reload_application
+              reload application
             </button>
           </div>
         </div>

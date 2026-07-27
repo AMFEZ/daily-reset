@@ -3,7 +3,8 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Daily Reset: The Reprogram",
-  description: "A self-help terminal for rebuilding consistency.",
+  description:
+    "A self-help terminal for rebuilding consistency.",
 };
 
 export default function RootLayout({

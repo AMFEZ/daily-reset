@@ -105,10 +105,12 @@ export function ReminderSettingsPanel({
 
   useEffect(() => {
     if (!("Notification" in window)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Notification support is available only after browser mount.
       setPermission("unsupported");
       return;
     }
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Hydrate the current browser permission after mount.
     setPermission(Notification.permission);
   }, []);
 

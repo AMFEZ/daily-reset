@@ -2,29 +2,29 @@ import Link from "next/link";
 
 export default function NotFound() {
   return (
-    <main className="grid min-h-screen place-items-center bg-black p-3 text-sm text-[#e5e5e5]">
-      <section className="w-full max-w-xl border border-[#242424] bg-[#050505]">
-        <div className="border-b border-[#242424] bg-[#0d0d0d] px-4 py-3">
-          <p className="terminal-green text-xs uppercase tracking-[0.2em]">
+    <main className="min-h-screen bg-black px-4 py-12 text-[#e5e5e5]">
+      <section className="mx-auto max-w-2xl border border-[#242424] bg-[#050505]">
+        <header className="border-b border-[#242424] bg-[#0d0d0d] px-4 py-3">
+          <p className="font-mono text-xs uppercase tracking-[0.2em] text-[#ffb020]">
             &gt; route.not_found
           </p>
-        </div>
+        </header>
 
-        <div className="p-4">
-          <p className="text-lg text-[#e5e5e5]">
-            404 / Unknown command
-          </p>
+        <div className="space-y-4 p-4 font-mono">
+          <h1 className="text-lg text-[#ffb020]">
+            This Daily Reset route does not exist.
+          </h1>
 
-          <p className="terminal-muted mt-3 text-xs leading-6">
-            &gt; The requested Daily Reset route does
-            not exist.
+          <p className="text-sm leading-6 text-[#a3a3a3]">
+            Return to the command center and
+            continue today&apos;s protocol.
           </p>
 
           <Link
             href="/"
-            className="mt-4 block min-h-[48px] border border-[#39ff88] bg-[#080808] px-4 py-3 text-sm text-[#39ff88]"
+            className="inline-flex min-h-[44px] items-center border border-[#39ff88] px-4 text-xs text-[#39ff88] transition hover:bg-[#041008] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#39ff88] focus-visible:ring-inset"
           >
-            &gt; return_home
+            return to daily reset
           </Link>
         </div>
       </section>

@@ -7,6 +7,8 @@ import {
 } from "react";
 import { ContextAudioRecorder } from "@/components/reset/ContextAudioRecorder";
 import { SignalDisclosure } from "@/components/reset/SignalDisclosure";
+import { SignalEntryDisclosure } from "@/components/reset/SignalEntryDisclosure";
+import { completeActivityHabit } from "@/lib/completeActivityHabit";
 import { createClient } from "@/utils/supabase/client";
 
 type ShadowEntry = {
@@ -160,7 +162,6 @@ export function ShadowConsolePanel({
             target_response: "",
             target_next_action:
               nextAction.trim(),
-            target_energy: null,
           })
           .single();
 
@@ -220,11 +221,25 @@ export function ShadowConsolePanel({
       setAudioPreviewUrl(null);
       setRawTranscript("");
       setCleanedTranscript("");
-      setMessage(
-        attachment.ok
-          ? "Shadow signal saved."
-          : `Shadow signal saved, but audio/transcript linking failed: ${attachment.error}`
-      );
+      try {
+        const matchedHabit =
+          await completeActivityHabit({
+            activity: "shadow",
+            date: getLocalDateKey(),
+          });
+
+        setMessage(
+          attachment.ok
+            ? `Shadow signal saved. ${matchedHabit.name} completed.`
+            : `Shadow signal saved and ${matchedHabit.name} completed, but audio/transcript linking failed: ${attachment.error}`
+        );
+      } catch (syncError) {
+        setMessage(
+          syncError instanceof Error
+            ? `Shadow signal saved, but habit sync failed: ${syncError.message}`
+            : "Shadow signal saved, but the shadow habit could not be completed."
+        );
+      }
     });
   }
 
@@ -311,7 +326,7 @@ export function ShadowConsolePanel({
 
       <div className="mt-3 border border-[#39ff88] bg-[#000000] p-4">
         <p className="terminal-muted text-[10px] uppercase tracking-[0.18em]">
-          TODAY'S QUESTION
+          TODAY&apos;S QUESTION
         </p>
         <p className="terminal-green mt-3 leading-7">
           {dailyPrompt}
@@ -429,34 +444,27 @@ export function ShadowConsolePanel({
             {sortedEntries.length > 0 ? (
               sortedEntries.map(
                 (entry, index) => {
-                  const created =
-                    new Date(
-                      entry.created_at
-                    );
+                  const created = new Date(
+                    entry.created_at
+                  );
+                  const timestamp = `${created.toLocaleDateString()} ${created.toLocaleTimeString(
+                    [],
+                    {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    }
+                  )}`;
 
                   return (
-                    <article
+                    <SignalEntryDisclosure
                       key={`${entry.id}-${entry.created_at}-${index}`}
-                      className="terminal-line p-3 text-xs"
+                      title={
+                        entry.title ||
+                        "Shadow Entry"
+                      }
+                      meta={timestamp}
+                      preview={entry.content}
                     >
-                      <div className="mb-2 flex flex-wrap justify-between gap-2">
-                        <span className="terminal-green">
-                          {entry.title ||
-                            "Shadow Entry"}
-                        </span>
-                        <span className="terminal-muted">
-                          {created.toLocaleDateString()}{" "}
-                          {created.toLocaleTimeString(
-                            [],
-                            {
-                              hour: "2-digit",
-                              minute:
-                                "2-digit",
-                            }
-                          )}
-                        </span>
-                      </div>
-
                       <p className="whitespace-pre-wrap leading-6">
                         {entry.content}
                       </p>
@@ -464,15 +472,12 @@ export function ShadowConsolePanel({
                       {entry.audio_path ? (
                         <div className="mt-3 border border-[#242424] bg-[#030303] p-3">
                           <p className="terminal-green break-all">
-                            audio:{" "}
-                            {entry.audio_path}
+                            audio: {entry.audio_path}
                           </p>
                           <button
                             type="button"
                             onClick={() =>
-                              transcribeEntry(
-                                entry
-                              )
+                              transcribeEntry(entry)
                             }
                             disabled={
                               transcribingEntryId ===
@@ -490,14 +495,12 @@ export function ShadowConsolePanel({
                       ) : null}
 
                       <TranscriptView
-                        raw={
-                          entry.raw_transcript
-                        }
+                        raw={entry.raw_transcript}
                         cleaned={
                           entry.cleaned_transcript
                         }
                       />
-                    </article>
+                    </SignalEntryDisclosure>
                   );
                 }
               )
@@ -699,4 +702,18 @@ function TerminalBlock({
       <div className="p-3">{children}</div>
     </section>
   );
+}
+
+
+function getLocalDateKey() {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(
+    date.getMonth() + 1
+  ).padStart(2, "0");
+  const day = String(
+    date.getDate()
+  ).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
 }

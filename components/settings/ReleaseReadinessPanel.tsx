@@ -133,6 +133,7 @@ export function ReleaseReadinessPanel() {
 
     if (stored) {
       try {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- Restore browser-only manual audit state after mount.
         setManualChecks({
           ...EMPTY_MANUAL_STATE,
           ...(JSON.parse(

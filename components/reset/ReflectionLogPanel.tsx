@@ -7,6 +7,7 @@ import {
 } from "react";
 import { ContextAudioRecorder } from "@/components/reset/ContextAudioRecorder";
 import { SignalDisclosure } from "@/components/reset/SignalDisclosure";
+import { SignalEntryDisclosure } from "@/components/reset/SignalEntryDisclosure";
 import { createClient } from "@/utils/supabase/client";
 
 type EntryType =
@@ -124,11 +125,10 @@ export function ReflectionLogPanel({
         await supabase
           .rpc("add_journal_entry", {
             target_entry_type: entryType,
-            target_title: null,
+            target_title: "",
             target_content: storedContent,
-            target_mood:
-              mood.trim() || null,
-            target_energy: null,
+            target_mood: mood.trim(),
+            target_energy: 0,
             target_tags: [],
           })
           .single();
@@ -519,28 +519,24 @@ function JournalHistoryEntry({
   const created = new Date(
     entry.created_at
   );
+  const title =
+    entry.entry_type === "freewrite"
+      ? "Freewrite"
+      : "Daily Reflection";
+  const timestamp = `${created.toLocaleDateString()} ${created.toLocaleTimeString(
+    [],
+    {
+      hour: "2-digit",
+      minute: "2-digit",
+    }
+  )}`;
 
   return (
-    <article className="terminal-line p-3 text-xs">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <span className="terminal-green">
-          {entry.entry_type ===
-          "freewrite"
-            ? "Freewrite"
-            : "Daily Reflection"}
-        </span>
-        <span className="terminal-muted">
-          {created.toLocaleDateString()}{" "}
-          {created.toLocaleTimeString(
-            [],
-            {
-              hour: "2-digit",
-              minute: "2-digit",
-            }
-          )}
-        </span>
-      </div>
-
+    <SignalEntryDisclosure
+      title={title}
+      meta={timestamp}
+      preview={entry.content}
+    >
       <p className="whitespace-pre-wrap leading-6 text-[#e5e5e5]">
         {entry.content}
       </p>
@@ -576,7 +572,7 @@ function JournalHistoryEntry({
           entry.cleaned_transcript
         }
       />
-    </article>
+    </SignalEntryDisclosure>
   );
 }
 

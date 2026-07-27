@@ -44,66 +44,23 @@ export function PWAController() {
         window.navigator.userAgent
       ) && !standalone;
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Browser-only install state is available after mount.
     setIsStandalone(standalone);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Browser-only platform state is available after mount.
     setIsIOS(ios);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Browser-only dismissal state is restored after mount.
     setIsDismissed(
-      window.localStorage.getItem(DISMISS_KEY) ===
-        "true"
+      window.localStorage.getItem(
+        DISMISS_KEY
+      ) === "true"
     );
 
-    if ("serviceWorker" in navigator) {
-      if (process.env.NODE_ENV === "production") {
-        void navigator.serviceWorker
-          .register("/sw.js", { scope: "/" })
-          .catch((error) => {
-            console.error(
-              "Service worker registration failed:",
-              error
-            );
-          });
-      } else {
-        // A service worker registered by a previous production test can
-        // keep intercepting localhost during development. Remove it so
-        // Next.js dev navigation always uses the current source files.
-        void navigator.serviceWorker
-          .getRegistrations()
-          .then((registrations) =>
-            Promise.all(
-              registrations.map((registration) =>
-                registration.unregister()
-              )
-            )
-          )
-          .catch((error) => {
-            console.error(
-              "Development service worker cleanup failed:",
-              error
-            );
-          });
-
-        if ("caches" in window) {
-          void window.caches
-            .keys()
-            .then((keys) =>
-              Promise.all(
-                keys
-                  .filter((key) =>
-                    key.startsWith("daily-reset-static-")
-                  )
-                  .map((key) =>
-                    window.caches.delete(key)
-                  )
-              )
-            )
-            .catch((error) => {
-              console.error(
-                "Development cache cleanup failed:",
-                error
-              );
-            });
-        }
-      }
-    }
+    // Service-worker registration is intentionally paused while the
+    // PWA cache strategy is rebuilt. A stale worker previously
+    // intercepted Next.js development assets and prevented hydration.
+    // Keeping registration disabled makes both development and
+    // production use the network directly and does not affect
+    // Supabase data, authentication, or installable manifest metadata.
 
     function handleInstallPrompt(event: Event) {
       event.preventDefault();
@@ -140,7 +97,10 @@ export function PWAController() {
   }, []);
 
   function dismissPrompt() {
-    window.localStorage.setItem(DISMISS_KEY, "true");
+    window.localStorage.setItem(
+      DISMISS_KEY,
+      "true"
+    );
     setIsDismissed(true);
   }
 

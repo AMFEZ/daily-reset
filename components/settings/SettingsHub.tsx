@@ -19,6 +19,7 @@ export function SettingsHub({
     useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Mark client hydration after the first browser mount.
     setHasMounted(true);
 
     const stored =
@@ -27,6 +28,7 @@ export function SettingsHub({
       );
 
     if (stored === "true") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Restore the browser-only persisted disclosure state.
       setIsOpen(true);
     }
   }, []);

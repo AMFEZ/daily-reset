@@ -1330,12 +1330,13 @@ function CollapsibleHistory({
 }: {
   title: string;
   count: number;
-  resetKey: number;
+  resetKey: string | number;
   children: React.ReactNode;
 }) {
   const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Close the disclosure when its explicit reset key changes.
     setIsOpen(false);
   }, [resetKey]);
 

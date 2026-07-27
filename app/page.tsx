@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { logout } from "@/app/login/actions";
 import { PWAController } from "@/components/pwa/PWAController";
@@ -13,8 +14,6 @@ import { ReminderSettingsPanel, type ReminderSetting } from "@/components/remind
 import { AIReflectionPanel } from "@/components/reset/AIReflectionPanel";
 import { BodyDataPanel } from "@/components/reset/BodyDataPanel";
 import { DreamArchivePanel } from "@/components/reset/DreamArchivePanel";
-import { DreamOrganizationPanel } from "@/components/reset/DreamOrganizationPanel";
-import { GoalsPanel, type ResetGoal } from "@/components/reset/GoalsPanel";
 import { ModuleAccordion } from "@/components/reset/ModuleAccordion";
 import { NutritionPanel } from "@/components/reset/NutritionPanel";
 import { ProtocolManagerPanel, type ManagedProtocol } from "@/components/reset/ProtocolManagerPanel";
@@ -33,6 +32,7 @@ import { RoutineTrendPanel } from "@/components/reset/RoutineTrendPanel";
 import { ShadowConsolePanel } from "@/components/reset/ShadowConsolePanel";
 import { SignalDisclosure } from "@/components/reset/SignalDisclosure";
 import { WeeklyResetPanel } from "@/components/reset/WeeklyResetPanel";
+import { BootWarningPanel } from "@/components/system/BootWarningPanel";
 import { calculateResetStreak } from "@/utils/reset-streak";
 import { createClient } from "@/utils/supabase/server";
 
@@ -86,50 +86,270 @@ export const viewport: Viewport = {
   themeColor: "#000000",
 };
 
+const BOOT_QUERY_TIMEOUT_MS = 8_000;
+const SEED_QUERY_TIMEOUT_MS = 5_000;
+
+type DashboardRoutineType =
+  | "morning"
+  | "daily"
+  | "night"
+  | "trust_based";
+
+type DashboardCompletionStatus =
+  | "complete"
+  | "mostly"
+  | "skipped"
+  | "pending";
+
+function normalizeRoutineType(
+  value: string | null
+): DashboardRoutineType {
+  switch (value) {
+    case "morning":
+    case "daily":
+    case "night":
+    case "trust_based":
+      return value;
+    default:
+      return "daily";
+  }
+}
+
+function normalizeCompletionStatus(
+  value: string | null
+): DashboardCompletionStatus {
+  switch (value) {
+    case "complete":
+    case "mostly":
+    case "skipped":
+    case "pending":
+      return value;
+    default:
+      return "pending";
+  }
+}
+async function withBootTimeout<T>(
+  label: string,
+  operation: PromiseLike<T>,
+  timeoutMs = BOOT_QUERY_TIMEOUT_MS
+): Promise<T> {
+  let timeout:
+    | ReturnType<typeof setTimeout>
+    | null = null;
+
+  try {
+    return await Promise.race([
+      Promise.resolve(operation),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => {
+          reject(
+            new Error(
+              `${label} timed out after ${
+                timeoutMs / 1_000
+              } seconds.`
+            )
+          );
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+function logSeedResult(
+  label: string,
+  result: PromiseSettledResult<{
+    error: {
+      message: string;
+    } | null;
+  }>
+) {
+  if (result.status === "rejected") {
+    console.error(
+      `${label} failed:`,
+      result.reason
+    );
+    return;
+  }
+
+  if (result.value.error) {
+    console.error(
+      `${label} failed:`,
+      result.value.error.message
+    );
+  }
+}
+
+type OptionalBootPayload<T> = {
+  data: T | null;
+  error: {
+    message: string;
+  } | null;
+};
+
+function readOptionalBootResult<T>(
+  label: string,
+  result: PromiseSettledResult<
+    OptionalBootPayload<T>
+  >,
+  warnings: string[]
+): T | null {
+  if (result.status === "rejected") {
+    const message =
+      result.reason instanceof Error
+        ? result.reason.message
+        : String(result.reason);
+
+    warnings.push(
+      `${label}: ${message}`
+    );
+    console.error(
+      `${label} failed:`,
+      result.reason
+    );
+    return null;
+  }
+
+  if (result.value.error) {
+    warnings.push(
+      `${label}: ${
+        result.value.error.message
+      }`
+    );
+    console.error(
+      `${label} failed:`,
+      result.value.error.message
+    );
+    return null;
+  }
+
+  return result.value.data;
+}
+
 export default async function Home() {
   const supabase = await createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const requestHeaders = await headers();
+  const verifiedUserId =
+    requestHeaders.get(
+      "x-daily-reset-user-id"
+    );
+  const verifiedUserEmail =
+    requestHeaders.get(
+      "x-daily-reset-user-email"
+    );
 
-  if (!user) {
+  if (!verifiedUserId) {
     redirect("/login");
   }
 
-  const { data: legacyProfile } =
-    await supabase
-      .from("profiles")
-      .select("protein_target")
-      .maybeSingle();
+  const user = {
+    id: verifiedUserId,
+    email: verifiedUserEmail,
+  };
 
-  const { error: seedSettingsError } =
-    await supabase.rpc(
-      "seed_default_reset_settings",
-      {
-        target_user_id: user.id,
-        target_protein_target:
-          legacyProfile?.protein_target ??
-          150,
-      }
+  let legacyProteinTarget = 150;
+
+  try {
+    const {
+      data: legacyProfile,
+      error: legacyProfileError,
+    } = await withBootTimeout(
+      "Legacy profile",
+      supabase
+        .from("profiles")
+        .select("protein_target")
+        .maybeSingle(),
+      4_000
     );
 
-  if (seedSettingsError) {
-    throw new Error(seedSettingsError.message);
+    if (legacyProfileError) {
+      console.error(
+        "Legacy profile lookup failed:",
+        legacyProfileError.message
+      );
+    } else {
+      legacyProteinTarget = Number(
+        legacyProfile?.protein_target ??
+          150
+      );
+    }
+  } catch (error) {
+    console.error(
+      "Legacy profile lookup failed:",
+      error
+    );
   }
+
+  const seedResults =
+    await Promise.allSettled([
+      withBootTimeout(
+        "Default settings seed",
+        supabase.rpc(
+          "seed_default_reset_settings",
+          {
+            target_user_id: user.id,
+            target_protein_target:
+              legacyProteinTarget,
+          }
+        ),
+        SEED_QUERY_TIMEOUT_MS
+      ),
+      withBootTimeout(
+        "Default habits seed",
+        supabase.rpc(
+          "seed_default_habits",
+          {
+            target_user_id: user.id,
+          }
+        ),
+        SEED_QUERY_TIMEOUT_MS
+      ),
+      withBootTimeout(
+        "Default reminders seed",
+        supabase.rpc(
+          "seed_default_reminders",
+          {
+            target_user_id: user.id,
+          }
+        ),
+        SEED_QUERY_TIMEOUT_MS
+      ),
+    ]);
+
+  logSeedResult(
+    "Default settings seed",
+    seedResults[0]
+  );
+  logSeedResult(
+    "Default habits seed",
+    seedResults[1]
+  );
+  logSeedResult(
+    "Default reminders seed",
+    seedResults[2]
+  );
 
   const {
     data: settingsRow,
     error: settingsRowError,
-  } = await supabase
-    .from("daily_reset_settings")
-    .select(
-      "protein_target, weight_unit, timezone, display_density, reduced_motion, updated_at"
-    )
-    .maybeSingle();
+  } = await withBootTimeout(
+    "Daily Reset settings",
+    supabase
+      .from("daily_reset_settings")
+      .select(
+        "protein_target, weight_unit, timezone, display_density, reduced_motion, updated_at"
+      )
+      .maybeSingle()
+  );
 
   if (settingsRowError) {
-    throw new Error(settingsRowError.message);
+    throw new Error(
+      `Settings failed: ${settingsRowError.message}`
+    );
   }
 
   const initialSettings: UserSettings = {
@@ -155,335 +375,434 @@ export default async function Home() {
       settingsRow?.updated_at ?? null,
   };
 
-  await supabase.rpc("seed_default_habits", {
-    target_user_id: user.id,
-  });
-
-  const { error: seedRemindersError } =
-    await supabase.rpc("seed_default_reminders", {
-      target_user_id: user.id,
-    });
-
-  if (seedRemindersError) {
-    throw new Error(seedRemindersError.message);
-  }
-
   const today = getTodayKey(
     initialSettings.timezone
   );
 
-  const { data: habits, error: habitsError } = await supabase
-    .from("habits")
-    .select(
-      "id, name, category, section, routine_type, sort_order"
-    )
-    .eq("is_active", true)
-    .order("sort_order", { ascending: true });
+  const [
+    habitsResult,
+    logsResult,
+  ] = await Promise.all([
+    withBootTimeout(
+      "Active protocols",
+      supabase
+        .from("habits")
+        .select(
+          "id, name, category, section, routine_type, sort_order"
+        )
+        .eq("is_active", true)
+        .order("sort_order", {
+          ascending: true,
+        })
+    ),
+    withBootTimeout(
+      "Today's protocol logs",
+      supabase
+        .from("habit_logs")
+        .select(
+          "habit_id, completed, completion_status"
+        )
+        .eq("date", today)
+    ),
+  ]);
 
-  if (habitsError) {
-    throw new Error(habitsError.message);
+  const criticalBootErrors = [
+    [
+      "Active protocols",
+      habitsResult.error,
+    ],
+    [
+      "Today's protocol logs",
+      logsResult.error,
+    ],
+  ] as const;
+
+  const firstCriticalBootError =
+    criticalBootErrors.find(
+      ([, error]) => Boolean(error)
+    );
+
+  if (firstCriticalBootError) {
+    const [label, error] =
+      firstCriticalBootError;
+
+    throw new Error(
+      `${label} failed: ${
+        error?.message ??
+        "Unknown database error."
+      }`
+    );
   }
 
-  const {
-    data: allHabitRows,
-    error: allHabitRowsError,
-  } = await supabase
-    .from("habits")
-    .select(
-      "id, name, category, section, routine_type, sort_order, is_active"
-    )
-    .order("sort_order", { ascending: true });
+  const [
+    allHabitsSettled,
+    weightLogsSettled,
+    proteinLogsSettled,
+    resetScoresSettled,
+    resetScoreDatesSettled,
+    remindersSettled,
+    journalEntriesSettled,
+    reprogramDesiresSettled,
+    reprogramEmotionLogsSettled,
+    reprogramBeliefsSettled,
+    aiReflectionsSettled,
+  ] = await Promise.allSettled([
+    withBootTimeout(
+      "Protocol manager",
+      supabase
+        .from("habits")
+        .select(
+          "id, name, category, section, routine_type, sort_order, is_active"
+        )
+        .order("sort_order", {
+          ascending: true,
+        })
+    ),
+    withBootTimeout(
+      "Weight history",
+      supabase
+        .from("weight_logs")
+        .select(
+          "id, date, weight, unit, note"
+        )
+        .order("date", {
+          ascending: false,
+        })
+        .limit(30)
+    ),
+    withBootTimeout(
+      "Protein history",
+      supabase
+        .from("protein_logs")
+        .select(
+          "id, date, amount, meal_type, note, created_at"
+        )
+        .order("created_at", {
+          ascending: false,
+        })
+        .limit(50)
+    ),
+    withBootTimeout(
+      "Reset score history",
+      supabase
+        .from("daily_reset_scores")
+        .select(`
+          id,
+          date,
+          morning_score,
+          daily_score,
+          night_score,
+          trust_score,
+          reset_score,
+          completed_protocols,
+          total_protocols,
+          system_status,
+          consistency_signal,
+          is_locked,
+          locked_at,
+          created_at
+        `)
+        .order("date", {
+          ascending: false,
+        })
+        .limit(30)
+    ),
+    withBootTimeout(
+      "Reset streak dates",
+      supabase
+        .from("daily_reset_scores")
+        .select("date")
+        .order("date", {
+          ascending: true,
+        })
+        .limit(1_500)
+    ),
+    withBootTimeout(
+      "Reminder settings",
+      supabase
+        .from("daily_reset_reminders")
+        .select(
+          "id, reminder_key, label, time_local, enabled, timezone, sort_order, updated_at"
+        )
+        .order("sort_order", {
+          ascending: true,
+        })
+    ),
+    withBootTimeout(
+      "Journal archive",
+      supabase
+        .from("journal_entries")
+        .select(
+          "id, entry_type, title, content, mood, energy, tags, audio_path, raw_transcript, cleaned_transcript, created_at"
+        )
+        .order("created_at", {
+          ascending: false,
+        })
+        .limit(25)
+    ),
+    withBootTimeout(
+      "Reprogram desires",
+      supabase
+        .from("reprogram_desires")
+        .select(
+          "id, desire, desire_emotions, absence_emotions, current_emotional_satisfaction, created_at, updated_at"
+        )
+        .order("created_at", {
+          ascending: false,
+        })
+        .limit(100)
+    ),
+    withBootTimeout(
+      "Reprogram emotion logs",
+      supabase
+        .from("reprogram_emotion_logs")
+        .select(
+          "id, trigger, emotion, alignment_status, occurred_at, created_at, updated_at"
+        )
+        .order("occurred_at", {
+          ascending: false,
+        })
+        .limit(100)
+    ),
+    withBootTimeout(
+      "Reprogram beliefs",
+      supabase
+        .from("reprogram_beliefs")
+        .select(
+          "id, faulty_belief, reconstruction_script, intensity_score, is_displaced, displaced_at, created_at, updated_at"
+        )
+        .order("created_at", {
+          ascending: false,
+        })
+        .limit(100)
+    ),
+    withBootTimeout(
+      "AI reflection history",
+      supabase
+        .from("ai_reflections")
+        .select(
+          "id, journal_entry_id, reflection_type, summary, emotional_themes, pattern_noticed, jungian_lens, freudian_lens, neuroscience_lens, compassionate_reframe, questions, action_step, interpretation_note, model, created_at"
+        )
+        .order("created_at", {
+          ascending: false,
+        })
+        .limit(25)
+    ),
+  ] as const);
 
-  if (allHabitRowsError) {
-    throw new Error(allHabitRowsError.message);
-  }
+  const bootWarnings: string[] = [];
 
-  const visibleHabits = (
-    habits ?? []
-  ).filter(
-    (habit) =>
-      !isRetiredProtocol(habit.name)
-  );
+  const habits =
+    habitsResult.data ?? [];
+  const logs =
+    logsResult.data ?? [];
 
-  const managedProtocols: ManagedProtocol[] = (
-    allHabitRows ?? []
-  )
+  const allHabitRows =
+    readOptionalBootResult(
+      "Protocol manager",
+      allHabitsSettled,
+      bootWarnings
+    ) ?? [];
+
+  const weightLogs =
+    readOptionalBootResult(
+      "Weight history",
+      weightLogsSettled,
+      bootWarnings
+    ) ?? [];
+
+  const proteinLogs =
+    readOptionalBootResult(
+      "Protein history",
+      proteinLogsSettled,
+      bootWarnings
+    ) ?? [];
+
+  const resetScores =
+    readOptionalBootResult(
+      "Reset score history",
+      resetScoresSettled,
+      bootWarnings
+    ) ?? [];
+
+  const resetScoreDates =
+    readOptionalBootResult(
+      "Reset streak dates",
+      resetScoreDatesSettled,
+      bootWarnings
+    ) ?? [];
+
+  const reminderRows =
+    readOptionalBootResult(
+      "Reminder settings",
+      remindersSettled,
+      bootWarnings
+    ) ?? [];
+
+  const journalEntries =
+    readOptionalBootResult(
+      "Journal archive",
+      journalEntriesSettled,
+      bootWarnings
+    ) ?? [];
+
+  const reprogramDesires =
+    readOptionalBootResult(
+      "Reprogram desires",
+      reprogramDesiresSettled,
+      bootWarnings
+    ) ?? [];
+
+  const reprogramEmotionLogs =
+    readOptionalBootResult(
+      "Reprogram emotion logs",
+      reprogramEmotionLogsSettled,
+      bootWarnings
+    ) ?? [];
+
+  const reprogramBeliefs =
+    readOptionalBootResult(
+      "Reprogram beliefs",
+      reprogramBeliefsSettled,
+      bootWarnings
+    ) ?? [];
+
+  const aiReflections =
+    readOptionalBootResult(
+      "AI reflection history",
+      aiReflectionsSettled,
+      bootWarnings
+    ) ?? [];
+
+  const visibleHabits = habits
     .filter(
       (habit) =>
         !isRetiredProtocol(habit.name)
     )
     .map((habit) => ({
-    id: habit.id,
-    name: habit.name,
-    category: habit.category,
-    section: habit.section,
-    routine_type:
-      habit.routine_type as ManagedProtocol["routine_type"],
-    sort_order: Number(
-      habit.sort_order ?? 0
-    ),
-    is_active: Boolean(habit.is_active),
-  }));
+      id: habit.id,
+      name: habit.name,
+      category: habit.category,
+      section: habit.section,
+      routine_type:
+        normalizeRoutineType(
+          habit.routine_type
+        ),
+      sort_order: Number(
+        habit.sort_order ?? 0
+      ),
+    }));
 
-  const { data: logs, error: logsError } = await supabase
-    .from("habit_logs")
-    .select("habit_id, completed, completion_status")
-    .eq("date", today);
+  const normalizedLogs = logs.map(
+    (log) => ({
+      habit_id: log.habit_id,
+      completed: Boolean(
+        log.completed
+      ),
+      completion_status:
+        normalizeCompletionStatus(
+          log.completion_status
+        ),
+    })
+  );
 
-  if (logsError) {
-    throw new Error(logsError.message);
-  }
-
-  const { data: weightLogs, error: weightLogsError } =
-    await supabase
-      .from("weight_logs")
-      .select("id, date, weight, unit, note")
-      .order("date", { ascending: false })
-      .limit(30);
-
-  if (weightLogsError) {
-    throw new Error(weightLogsError.message);
-  }
-
-  const { data: proteinLogs, error: proteinLogsError } =
-    await supabase
-      .from("protein_logs")
-      .select(
-        "id, date, amount, meal_type, note, created_at"
+  const managedProtocols: ManagedProtocol[] =
+    allHabitRows
+      .filter(
+        (habit) =>
+          !isRetiredProtocol(habit.name)
       )
-      .order("created_at", { ascending: false })
-      .limit(50);
+      .map((habit) => ({
+        id: habit.id,
+        name: habit.name,
+        category: habit.category,
+        section: habit.section,
+        routine_type:
+          habit.routine_type as ManagedProtocol["routine_type"],
+        sort_order: Number(
+          habit.sort_order ?? 0
+        ),
+        is_active: Boolean(
+          habit.is_active
+        ),
+      }));
 
-  if (proteinLogsError) {
-    throw new Error(proteinLogsError.message);
-  }
+  const streakStats =
+    calculateResetStreak(
+      resetScoreDates.map(
+        (score) => score.date
+      )
+    );
 
-  const { data: resetScores, error: resetScoresError } =
-    await supabase
-      .from("daily_reset_scores")
-      .select(`
-        id,
-        date,
-        morning_score,
-        daily_score,
-        night_score,
-        trust_score,
-        reset_score,
-        completed_protocols,
-        total_protocols,
-        system_status,
-        consistency_signal,
-        is_locked,
-        locked_at,
-        created_at
-      `)
-      .order("date", { ascending: false })
-      .limit(30);
+  const initialReminders: ReminderSetting[] =
+    reminderRows.map((reminder) => ({
+      id: reminder.id,
+      reminder_key:
+        reminder.reminder_key as ReminderSetting["reminder_key"],
+      label: reminder.label,
+      time_local: String(
+        reminder.time_local ?? "00:00"
+      ).slice(0, 5),
+      enabled: Boolean(
+        reminder.enabled
+      ),
+      timezone:
+        reminder.timezone ??
+        APP_TIME_ZONE,
+      sort_order: Number(
+        reminder.sort_order ?? 0
+      ),
+      updated_at:
+        reminder.updated_at,
+    }));
 
-  if (resetScoresError) {
-    throw new Error(resetScoresError.message);
-  }
+  const shadowEntries =
+    journalEntries.filter(
+      (entry) =>
+        entry.entry_type ===
+        "shadow"
+    );
 
-  const { data: resetScoreDates, error: resetScoreDatesError } =
-    await supabase
-      .from("daily_reset_scores")
-      .select("date")
-      .order("date", { ascending: true });
+  const dreamEntries =
+    journalEntries.filter(
+      (entry) =>
+        entry.entry_type ===
+        "dream"
+    );
 
-  if (resetScoreDatesError) {
-    throw new Error(resetScoreDatesError.message);
-  }
-
-  const streakStats = calculateResetStreak(
-    (resetScoreDates ?? []).map((score) => score.date)
-  );
-
-  const {
-    data: reminderRows,
-    error: reminderRowsError,
-  } = await supabase
-    .from("daily_reset_reminders")
-    .select(
-      "id, reminder_key, label, time_local, enabled, timezone, sort_order, updated_at"
-    )
-    .order("sort_order", { ascending: true });
-
-  if (reminderRowsError) {
-    throw new Error(reminderRowsError.message);
-  }
-
-  const initialReminders: ReminderSetting[] = (
-    reminderRows ?? []
-  ).map((reminder) => ({
-    id: reminder.id,
-    reminder_key:
-      reminder.reminder_key as ReminderSetting["reminder_key"],
-    label: reminder.label,
-    time_local: String(
-      reminder.time_local ?? "00:00"
-    ).slice(0, 5),
-    enabled: Boolean(reminder.enabled),
-    timezone:
-      reminder.timezone ?? APP_TIME_ZONE,
-    sort_order: Number(
-      reminder.sort_order ?? 0
-    ),
-    updated_at: reminder.updated_at,
-  }));
-
-  const {
-    data: journalEntries,
-    error: journalEntriesError,
-  } = await supabase
-    .from("journal_entries")
-    .select(
-      "id, entry_type, title, content, mood, energy, tags, audio_path, raw_transcript, cleaned_transcript, created_at"
-    )
-    .order("created_at", { ascending: false })
-    .limit(25);
-
-  if (journalEntriesError) {
-    throw new Error(journalEntriesError.message);
-  }
-
-  const shadowEntries = (journalEntries ?? []).filter(
-    (entry) => entry.entry_type === "shadow"
-  );
-
-  const dreamEntries = (journalEntries ?? []).filter(
-    (entry) => entry.entry_type === "dream"
-  );
-
-  const {
-    data: goalRows,
-    error: goalRowsError,
-  } = await supabase
-    .from("reset_goals")
-    .select(
-      "id, title, goal_type, current_value, target_value, unit, deadline, status, notes, created_at, updated_at"
-    )
-    .order("updated_at", { ascending: false });
-
-  if (goalRowsError) {
-    throw new Error(goalRowsError.message);
-  }
-
-  const initialGoals: ResetGoal[] = (
-    goalRows ?? []
-  ).map((goal) => ({
-    id: goal.id,
-    title: goal.title,
-    goal_type:
-      goal.goal_type === "milestone"
-        ? "milestone"
-        : "number",
-    current_value: Number(
-      goal.current_value ?? 0
-    ),
-    target_value: Number(
-      goal.target_value ?? 1
-    ),
-    unit: goal.unit,
-    deadline: goal.deadline,
-    status:
-      goal.status === "complete" ||
-      goal.status === "paused"
-        ? goal.status
-        : "active",
-    notes: goal.notes,
-    created_at: goal.created_at,
-    updated_at: goal.updated_at,
-  }));
-
-  const {
-    data: reprogramDesires,
-    error: reprogramDesiresError,
-  } = await supabase
-    .from("reprogram_desires")
-    .select(
-      "id, desire, desire_emotions, absence_emotions, current_emotional_satisfaction, created_at, updated_at"
-    )
-    .order("created_at", { ascending: false })
-    .limit(100);
-
-  if (reprogramDesiresError) {
-    throw new Error(reprogramDesiresError.message);
-  }
-
-  const {
-    data: reprogramEmotionLogs,
-    error: reprogramEmotionLogsError,
-  } = await supabase
-    .from("reprogram_emotion_logs")
-    .select(
-      "id, trigger, emotion, alignment_status, occurred_at, created_at, updated_at"
-    )
-    .order("occurred_at", { ascending: false })
-    .limit(100);
-
-  if (reprogramEmotionLogsError) {
-    throw new Error(reprogramEmotionLogsError.message);
-  }
-
-  const {
-    data: reprogramBeliefs,
-    error: reprogramBeliefsError,
-  } = await supabase
-    .from("reprogram_beliefs")
-    .select(
-      "id, faulty_belief, reconstruction_script, intensity_score, is_displaced, displaced_at, created_at, updated_at"
-    )
-    .order("created_at", { ascending: false })
-    .limit(100);
-
-  if (reprogramBeliefsError) {
-    throw new Error(reprogramBeliefsError.message);
-  }
-
-  const {
-    data: aiReflections,
-    error: aiReflectionsError,
-  } = await supabase
-    .from("ai_reflections")
-    .select(
-      "id, journal_entry_id, reflection_type, summary, emotional_themes, pattern_noticed, jungian_lens, freudian_lens, neuroscience_lens, compassionate_reframe, questions, action_step, interpretation_note, model, created_at"
-    )
-    .order("created_at", { ascending: false })
-    .limit(25);
-
-  if (aiReflectionsError) {
-    throw new Error(aiReflectionsError.message);
-  }
-
-  const dreamInterpretations = (
-    aiReflections ?? []
-  ).filter(
-    (reflection) => reflection.reflection_type === "dream"
-  );
+  const dreamInterpretations =
+    aiReflections.filter(
+      (reflection) =>
+        reflection.reflection_type ===
+        "dream"
+    );
 
   const totalProtocols =
     visibleHabits.length;
 
   const todayReset =
-    (resetScores ?? []).find(
-      (score) => score.date === today
+    resetScores.find(
+      (score) =>
+        score.date === today
     ) ?? null;
 
-  const todayProtein = (proteinLogs ?? [])
-    .filter((log) => log.date === today)
-    .reduce(
-      (sum, log) =>
-        sum + Number(log.amount ?? 0),
-      0
-    );
+  const todayProtein =
+    proteinLogs
+      .filter(
+        (log) => log.date === today
+      )
+      .reduce(
+        (sum, log) =>
+          sum +
+          Number(log.amount ?? 0),
+        0
+      );
 
   const latestWeight =
-    (weightLogs ?? [])[0] ?? null;
+    weightLogs[0] ?? null;
 
   const activeGoalCount =
-    initialGoals.filter(
-      (goal) => goal.status === "active"
-    ).length;
+    reprogramDesires.length;
 
   return (
     <main className="min-h-screen bg-black px-0 py-0 text-sm text-[#e5e5e5] sm:px-3 sm:py-4 md:px-8 md:py-8">
@@ -520,10 +839,14 @@ export default async function Home() {
           />
 
           <div className="space-y-3 sm:space-y-4">
+            <BootWarningPanel
+              warnings={bootWarnings}
+            />
+
             <ResetDashboard
               userEmail={user.email ?? "ONLINE"}
               habits={visibleHabits}
-              logs={logs ?? []}
+              logs={normalizedLogs}
               totalProtocols={totalProtocols}
               initialHasResetRecord={Boolean(todayReset)}
               initialIsLocked={Boolean(
@@ -538,19 +861,23 @@ export default async function Home() {
               currentStreak={
                 streakStats.currentStreak
               }
-              todayProtein={todayProtein}
+              todayProtein={
+                todayProtein
+              }
               proteinTarget={
                 initialSettings.protein_target
               }
               latestWeight={
                 latestWeight
-                  ? Number(latestWeight.weight)
+                  ? Number(
+                      latestWeight.weight
+                    )
                   : null
               }
               weightUnit={
                 latestWeight?.unit === "kg"
                   ? "kg"
-                  : "lbs"
+                  : initialSettings.weight_unit
               }
               activeGoalCount={
                 activeGoalCount
@@ -683,40 +1010,6 @@ export default async function Home() {
                 </ModuleAccordion>
 
                 <ModuleAccordion
-                  id="goals-milestones"
-                  title="goals.milestones"
-                  subtitle="Long-term outcomes and measurable progress"
-                >
-                  <GoalsPanel
-                    initialGoals={initialGoals}
-                  />
-                </ModuleAccordion>
-
-                <ModuleAccordion
-                  id="dream-index"
-                  title="dream.index"
-                  subtitle="Search, filter, and review recurring dream signals"
-                >
-                  <DreamOrganizationPanel
-                    initialEntries={dreamEntries.map(
-                      (entry) => ({
-                        id: entry.id,
-                        title: entry.title,
-                        content: entry.content,
-                        mood: entry.mood,
-                        tags: entry.tags,
-                        raw_transcript:
-                          entry.raw_transcript,
-                        cleaned_transcript:
-                          entry.cleaned_transcript,
-                        created_at:
-                          entry.created_at,
-                      })
-                    )}
-                  />
-                </ModuleAccordion>
-
-                <ModuleAccordion
                   id="shadow-console"
                   title="shadow.console"
                   subtitle="One deep prompt with writing, voice, and transcript"
@@ -727,7 +1020,8 @@ export default async function Home() {
                         id: entry.id,
                         entry_type: "shadow",
                         title: entry.title,
-                        content: entry.content,
+                        content:
+                          entry.content ?? "",
                         mood: entry.mood,
                         energy: entry.energy,
                         tags: entry.tags,
@@ -755,7 +1049,8 @@ export default async function Home() {
                         id: entry.id,
                         entry_type: "dream",
                         title: entry.title,
-                        content: entry.content,
+                        content:
+                          entry.content ?? "",
                         mood: entry.mood,
                         energy: entry.energy,
                         tags: entry.tags,
@@ -771,7 +1066,8 @@ export default async function Home() {
                       (interpretation) => ({
                         id: interpretation.id,
                         journal_entry_id:
-                          interpretation.journal_entry_id,
+                          interpretation.journal_entry_id ??
+                          "",
                         reflection_type: "dream",
                         summary: interpretation.summary,
                         emotional_themes:
@@ -818,7 +1114,8 @@ export default async function Home() {
                             | "dream"
                             | "freewrite",
                         title: entry.title,
-                        content: entry.content,
+                        content:
+                          entry.content ?? "",
                         mood: entry.mood,
                         energy: entry.energy,
                         tags: entry.tags,
@@ -830,7 +1127,8 @@ export default async function Home() {
                     ).map((reflection) => ({
                       id: reflection.id,
                       journal_entry_id:
-                        reflection.journal_entry_id,
+                        reflection.journal_entry_id ??
+                        "",
                       reflection_type:
                         reflection.reflection_type as
                           | "journal"

@@ -55,6 +55,7 @@ export function ProductionDeploymentPanel() {
     useTransition();
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Hydrate browser-only deployment state after mount.
     setBrowserState(readBrowserState());
 
     // Keep startup network-free. Deployment metadata is loaded only

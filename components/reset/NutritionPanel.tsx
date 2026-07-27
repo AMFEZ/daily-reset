@@ -6,6 +6,7 @@ import {
   useTransition,
 } from "react";
 import { SignalDisclosure } from "@/components/reset/SignalDisclosure";
+import { SignalEntryDisclosure } from "@/components/reset/SignalEntryDisclosure";
 import { createClient } from "@/utils/supabase/client";
 
 type MealType =
@@ -124,8 +125,7 @@ export function NutritionPanel({
             target_date: today,
             target_amount: grams,
             target_meal_type: mealType,
-            target_note:
-              note.trim() || null,
+            target_note: note.trim(),
           })
           .single();
 
@@ -453,36 +453,43 @@ export function NutritionPanel({
           <div className="max-h-[360px] overflow-y-auto border border-[#242424]">
             {sortedLogs.length > 0 ? (
               sortedLogs.map((log, index) => (
-                <div
+                <SignalEntryDisclosure
                   key={`${log.id}-${log.created_at}-${index}`}
-                  className="terminal-line grid gap-3 px-3 py-3 text-xs sm:grid-cols-[100px_70px_1fr_auto]"
+                  title={`${log.amount}g · ${log.meal_type}`}
+                  meta={log.date}
+                  preview={
+                    log.note ??
+                    "Protein signal"
+                  }
                 >
-                  <span className="terminal-muted">
-                    {log.date}
-                  </span>
-                  <span className="terminal-green">
-                    {log.amount}g
-                  </span>
-                  <span>
-                    {log.meal_type}
-                    {log.note ? (
-                      <span className="terminal-muted">
-                        {" "}
-                        — {log.note}
-                      </span>
-                    ) : null}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      removeSingleLog(log)
-                    }
-                    disabled={isPending}
-                    className="border border-[#242424] px-2 py-1 text-left text-[10px] text-[#ffb020] transition hover:border-[#ffb020] disabled:opacity-40"
-                  >
-                    remove
-                  </button>
-                </div>
+                  <div className="grid gap-3 sm:grid-cols-[100px_70px_1fr_auto] sm:items-center">
+                    <span className="terminal-muted">
+                      {log.date}
+                    </span>
+                    <span className="terminal-green">
+                      {log.amount}g
+                    </span>
+                    <span>
+                      {log.meal_type}
+                      {log.note ? (
+                        <span className="terminal-muted">
+                          {" "}
+                          — {log.note}
+                        </span>
+                      ) : null}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        removeSingleLog(log)
+                      }
+                      disabled={isPending}
+                      className="border border-[#242424] px-2 py-1 text-left text-[10px] text-[#ffb020] transition hover:border-[#ffb020] disabled:opacity-40"
+                    >
+                      remove
+                    </button>
+                  </div>
+                </SignalEntryDisclosure>
               ))
             ) : (
               <p className="terminal-muted p-3 text-xs">

@@ -123,6 +123,7 @@ export function ProtocolManagerPanel({
     useTransition();
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Synchronize editable local protocol state when server props change.
     setProtocols(
       sortProtocols(initialProtocols)
     );
