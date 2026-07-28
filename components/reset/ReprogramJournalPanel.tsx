@@ -116,11 +116,6 @@ export function ReprogramJournalPanel({
 
   return (
     <TerminalBlock title="reprogram.journal">
-      <p className="terminal-muted text-xs leading-6">
-        &gt; Capture desires, identify emotional
-        resistance, and reconstruct beliefs that no
-        longer serve the person you are becoming.
-      </p>
 
       <div className="mt-4 grid gap-2 md:grid-cols-3">
         {(
@@ -324,7 +319,6 @@ function DesireSection({
               setDesire(event.target.value)
             }
             className={textareaClass}
-            placeholder="What do I want?"
           />
         </FieldLabel>
 
@@ -337,7 +331,6 @@ function DesireSection({
               )
             }
             className={textareaClass}
-            placeholder="How would having this feel?"
           />
         </FieldLabel>
 
@@ -350,7 +343,6 @@ function DesireSection({
               )
             }
             className={textareaClass}
-            placeholder="What emotions appear when I notice it is not here yet?"
           />
         </FieldLabel>
 
@@ -541,7 +533,6 @@ function EmotionSection({
               setTrigger(event.target.value)
             }
             className={textareaClass}
-            placeholder="What happened, or what thought appeared?"
           />
         </FieldLabel>
 
@@ -552,7 +543,6 @@ function EmotionSection({
               setEmotion(event.target.value)
             }
             className={inputClass}
-            placeholder="frustrated, afraid, ashamed, calm..."
           />
         </FieldLabel>
 
@@ -782,7 +772,6 @@ function BeliefSection({
               )
             }
             className={textareaClass}
-            placeholder="I am not good enough to complete this job."
           />
         </FieldLabel>
 
@@ -795,7 +784,6 @@ function BeliefSection({
               )
             }
             className="mt-2 min-h-[180px] w-full resize-y border border-[#242424] bg-[#050505] px-3 py-3 text-sm leading-6 text-[#e5e5e5] outline-none focus:border-[#39ff88]"
-            placeholder="What is more accurate, natural, compassionate, and useful?"
           />
         </FieldLabel>
 
@@ -1233,7 +1221,6 @@ function countTriggerKeywords(
 
 function SectionLayout({
   title,
-  description,
   children,
 }: {
   title: string;
@@ -1245,10 +1232,6 @@ function SectionLayout({
       <div className="mb-4 border border-[#242424] bg-[#080808] p-3">
         <p className="terminal-green text-xs uppercase tracking-[0.2em]">
           &gt; {title}
-        </p>
-
-        <p className="terminal-muted mt-3 text-xs leading-6">
-          &gt; {description}
         </p>
       </div>
 
@@ -1746,25 +1729,13 @@ function EmptyHistory({
 }
 
 function TerminalBlock({
-  title,
   children,
 }: {
   title: string;
   children: React.ReactNode;
 }) {
-  return (
-    <section className="border border-[#242424] bg-[#050505]">
-      <div className="border-b border-[#242424] bg-[#0d0d0d] px-3 py-2">
-        <p className="terminal-green text-xs uppercase tracking-[0.2em]">
-          &gt; {title}
-        </p>
-      </div>
-
-      <div className="p-3">{children}</div>
-    </section>
-  );
+  return <div className="p-3">{children}</div>;
 }
-
 function TerminalRow({
   label,
   value,

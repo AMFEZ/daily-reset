@@ -278,10 +278,6 @@ export function ReflectionLogPanel({
 
   return (
     <TerminalBlock title="reflection.log">
-      <p className="terminal-muted mb-3 text-xs leading-6">
-        &gt; Write or speak the signal. Reflection
-        capture stays separate from AI interpretation.
-      </p>
 
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block">
@@ -311,7 +307,6 @@ export function ReflectionLogPanel({
             onChange={(event) =>
               setMood(event.target.value)
             }
-            placeholder="calm, heavy, focused..."
             className={inputClassName}
           />
         </label>
@@ -324,7 +319,6 @@ export function ReflectionLogPanel({
           onChange={(event) =>
             setContent(event.target.value)
           }
-          placeholder="Type the signal..."
           className={`${inputClassName} min-h-[220px] resize-y leading-6`}
         />
       </label>
@@ -535,7 +529,6 @@ function JournalHistoryEntry({
     <SignalEntryDisclosure
       title={title}
       meta={timestamp}
-      preview={entry.content}
     >
       <p className="whitespace-pre-wrap leading-6 text-[#e5e5e5]">
         {entry.content}
@@ -603,7 +596,6 @@ function TranscriptFields({
             )
           }
           className={`${inputClassName} min-h-[110px] resize-y leading-6`}
-          placeholder="Speech-to-text or manual transcript..."
         />
       </label>
       <label className="mt-3 block">
@@ -618,7 +610,6 @@ function TranscriptFields({
             )
           }
           className={`${inputClassName} min-h-[110px] resize-y leading-6`}
-          placeholder="Cleaned version..."
         />
       </label>
     </div>
@@ -676,20 +667,10 @@ function FieldLabel({
 }
 
 function TerminalBlock({
-  title,
   children,
 }: {
   title: string;
   children: React.ReactNode;
 }) {
-  return (
-    <section className="border border-[#242424] bg-[#050505]">
-      <div className="border-b border-[#242424] bg-[#0d0d0d] px-3 py-2">
-        <p className="terminal-green text-xs uppercase tracking-[0.2em]">
-          &gt; {title}
-        </p>
-      </div>
-      <div className="p-3">{children}</div>
-    </section>
-  );
+  return <div className="p-3">{children}</div>;
 }

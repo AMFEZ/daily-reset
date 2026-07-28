@@ -1,30 +1,46 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useState,
+} from "react";
 
-type BeforeInstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{
-    outcome: "accepted" | "dismissed";
-    platform: string;
-  }>;
-};
+type BeforeInstallPromptEvent =
+  Event & {
+    prompt: () =>
+      Promise<void>;
+    userChoice: Promise<{
+      outcome:
+        | "accepted"
+        | "dismissed";
+      platform: string;
+    }>;
+  };
 
 const DISMISS_KEY =
   "daily-reset-pwa-install-dismissed-v1";
 
 export function PWAController() {
-  const [installPrompt, setInstallPrompt] =
-    useState<BeforeInstallPromptEvent | null>(
-      null
-    );
-  const [isIOS, setIsIOS] = useState(false);
-  const [isStandalone, setIsStandalone] =
+  const [
+    installPrompt,
+    setInstallPrompt,
+  ] = useState<
+    BeforeInstallPromptEvent | null
+  >(null);
+  const [isIOS, setIsIOS] =
     useState(false);
-  const [isDismissed, setIsDismissed] =
-    useState(true);
-  const [isInstalling, setIsInstalling] =
-    useState(false);
+  const [
+    isStandalone,
+    setIsStandalone,
+  ] = useState(false);
+  const [
+    isDismissed,
+    setIsDismissed,
+  ] = useState(true);
+  const [
+    isInstalling,
+    setIsInstalling,
+  ] = useState(false);
 
   useEffect(() => {
     const standalone =
@@ -33,9 +49,10 @@ export function PWAController() {
       ).matches ||
       Boolean(
         (
-          window.navigator as Navigator & {
-            standalone?: boolean;
-          }
+          window.navigator as
+            Navigator & {
+              standalone?: boolean;
+            }
         ).standalone
       );
 
@@ -45,7 +62,9 @@ export function PWAController() {
       ) && !standalone;
 
     // eslint-disable-next-line react-hooks/set-state-in-effect -- Browser-only install state is available after mount.
-    setIsStandalone(standalone);
+    setIsStandalone(
+      standalone
+    );
     // eslint-disable-next-line react-hooks/set-state-in-effect -- Browser-only platform state is available after mount.
     setIsIOS(ios);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- Browser-only dismissal state is restored after mount.
@@ -55,17 +74,39 @@ export function PWAController() {
       ) === "true"
     );
 
-    // Service-worker registration is intentionally paused while the
-    // PWA cache strategy is rebuilt. A stale worker previously
-    // intercepted Next.js development assets and prevented hydration.
-    // Keeping registration disabled makes both development and
-    // production use the network directly and does not affect
-    // Supabase data, authentication, or installable manifest metadata.
+    if (
+      "serviceWorker" in
+        navigator &&
+      window.isSecureContext
+    ) {
+      void navigator.serviceWorker
+        .register(
+          "/sw.js",
+          {
+            scope: "/",
+            updateViaCache:
+              "none",
+          }
+        )
+        .then(
+          (registration) =>
+            registration.update()
+        )
+        .catch((error) => {
+          console.error(
+            "Service worker registration failed:",
+            error
+          );
+        });
+    }
 
-    function handleInstallPrompt(event: Event) {
+    function handleInstallPrompt(
+      event: Event
+    ) {
       event.preventDefault();
       setInstallPrompt(
-        event as BeforeInstallPromptEvent
+        event as
+          BeforeInstallPromptEvent
       );
       setIsDismissed(false);
     }
@@ -113,10 +154,14 @@ export function PWAController() {
 
     try {
       await installPrompt.prompt();
+
       const choice =
         await installPrompt.userChoice;
 
-      if (choice.outcome === "accepted") {
+      if (
+        choice.outcome ===
+        "accepted"
+      ) {
         setInstallPrompt(null);
       }
     } finally {
@@ -127,7 +172,10 @@ export function PWAController() {
   if (
     isStandalone ||
     isDismissed ||
-    (!installPrompt && !isIOS)
+    (
+      !installPrompt &&
+      !isIOS
+    )
   ) {
     return null;
   }
@@ -144,7 +192,8 @@ export function PWAController() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="terminal-green text-xs uppercase tracking-[0.18em]">
-            &gt; install.daily_reset
+            &gt;{" "}
+            install.daily_reset
           </p>
 
           <p className="terminal-muted mt-2 text-xs leading-5">
@@ -156,7 +205,9 @@ export function PWAController() {
 
         <button
           type="button"
-          onClick={dismissPrompt}
+          onClick={
+            dismissPrompt
+          }
           className="min-h-[44px] min-w-[44px] border border-[#242424] text-[#8a8a8a]"
           aria-label="Dismiss install prompt"
         >
@@ -167,8 +218,12 @@ export function PWAController() {
       {!isIOS ? (
         <button
           type="button"
-          onClick={installApp}
-          disabled={isInstalling}
+          onClick={
+            installApp
+          }
+          disabled={
+            isInstalling
+          }
           className="mt-3 min-h-[48px] w-full border border-[#39ff88] bg-[#080808] px-4 py-3 text-left text-sm text-[#39ff88] disabled:cursor-not-allowed disabled:opacity-60"
         >
           &gt;{" "}

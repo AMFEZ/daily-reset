@@ -453,7 +453,6 @@ export function ProtocolManagerPanel({
                     event.target.value
                   )
                 }
-                placeholder="Example: Night stretches"
                 className={inputClassName}
               />
             </Field>
@@ -468,7 +467,6 @@ export function ProtocolManagerPanel({
                     event.target.value
                   )
                 }
-                placeholder="Custom"
                 className={inputClassName}
               />
             </Field>

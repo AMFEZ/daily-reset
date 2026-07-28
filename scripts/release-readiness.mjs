@@ -288,6 +288,11 @@ const env = loadEnvKeys();
 const exactRequiredKeys = [
   "NEXT_PUBLIC_SUPABASE_URL",
   "OPENAI_API_KEY",
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "VAPID_PUBLIC_KEY",
+  "VAPID_PRIVATE_KEY",
+  "VAPID_SUBJECT",
+  "CRON_SECRET",
 ];
 
 for (const key of exactRequiredKeys) {
@@ -319,6 +324,7 @@ const forbiddenEnvironmentKeys = [
   "NEXT_PUBLIC_OPENAI_API_KEY",
   "NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY",
   "NEXT_PUBLIC_SERVICE_ROLE_KEY",
+  "NEXT_PUBLIC_VAPID_PRIVATE_KEY",
 ];
 
 for (
@@ -347,6 +353,12 @@ const forbiddenSourcePatterns = [
       "public Supabase service-role reference",
     pattern:
       /NEXT_PUBLIC_(?:SUPABASE_)?SERVICE_ROLE_KEY/gu,
+  },
+  {
+    label:
+      "public VAPID private-key reference",
+    pattern:
+      /NEXT_PUBLIC_VAPID_PRIVATE_KEY/gu,
   },
 ];
 

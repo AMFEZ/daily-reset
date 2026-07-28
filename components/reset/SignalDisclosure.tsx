@@ -18,7 +18,6 @@ export function SignalDisclosure({
   title,
   children,
   count,
-  summary,
   defaultOpen = false,
 }: SignalDisclosureProps) {
   const [isOpen, setIsOpen] =
@@ -28,7 +27,7 @@ export function SignalDisclosure({
     `signal-disclosure-${generatedId.replace(/:/g, "")}`;
 
   return (
-    <section className="border border-[#242424] bg-[#050505]">
+    <section className="min-w-0 max-w-full overflow-hidden border border-[#242424] bg-[#050505]">
       <button
         type="button"
         onClick={() =>
@@ -36,18 +35,12 @@ export function SignalDisclosure({
         }
         aria-expanded={isOpen}
         aria-controls={contentId}
-        className="flex min-h-[52px] w-full items-center justify-between gap-4 bg-[#0d0d0d] px-3 py-3 text-left transition hover:bg-[#111111]"
+        className="flex min-h-[52px] min-w-0 max-w-full items-center justify-between gap-3 overflow-hidden bg-[#0d0d0d] px-3 py-3 text-left transition hover:bg-[#111111]"
       >
         <span className="min-w-0">
           <span className="terminal-green block break-words text-xs uppercase tracking-[0.18em]">
             &gt; {title}
           </span>
-
-          {summary ? (
-            <span className="terminal-muted mt-1 block text-[10px] leading-5">
-              {summary}
-            </span>
-          ) : null}
         </span>
 
         <span className="flex shrink-0 items-center gap-3">
@@ -72,7 +65,7 @@ export function SignalDisclosure({
       {isOpen ? (
         <div
           id={contentId}
-          className="border-t border-[#242424] p-3"
+          className="min-w-0 max-w-full overflow-hidden border-t border-[#242424] p-3"
         >
           {children}
         </div>

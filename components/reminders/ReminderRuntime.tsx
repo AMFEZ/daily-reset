@@ -29,6 +29,8 @@ const CHECK_INTERVAL_MILLISECONDS = 30_000;
 const REMINDER_GRACE_MINUTES = 180;
 const STORAGE_PREFIX =
   "daily-reset-reminder-delivered";
+const PUSH_ENABLED_STORAGE_KEY =
+  "daily-reset:push-enabled";
 
 const REMINDER_CONTENT: Record<
   ReminderKey,
@@ -130,7 +132,13 @@ export function ReminderRuntime({
 
         setActiveReminder(active);
 
+        const backgroundPushEnabled =
+          window.localStorage.getItem(
+            PUSH_ENABLED_STORAGE_KEY
+          ) === "true";
+
         if (
+          !backgroundPushEnabled &&
           "Notification" in window &&
           Notification.permission === "granted"
         ) {

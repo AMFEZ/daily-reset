@@ -68,13 +68,6 @@ type ResetDashboardProps = {
   children?: React.ReactNode;
 };
 
-const routineLabels: Record<RoutineType, string> = {
-  morning: "morning_reset.list",
-  daily: "daily_protocols.list",
-  night: "shutdown_protocol.list",
-  trust_based: "sleep_boundary.confirm",
-};
-
 const routineTitles: Record<RoutineType, string> = {
   morning: "Morning Reset",
   daily: "Daily Protocols",
@@ -1280,8 +1273,7 @@ export function ResetDashboard({
       <div className="mt-4 grid gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Checklist
           id="morning"
-          title={routineLabels.morning}
-          displayTitle={routineTitles.morning}
+          title={routineTitles.morning}
           items={grouped.morning}
           completedMap={completedMap}
           pendingHabitIds={pendingHabitIds}
@@ -1291,8 +1283,7 @@ export function ResetDashboard({
 
         <Checklist
           id="daily"
-          title={routineLabels.daily}
-          displayTitle={routineTitles.daily}
+          title={routineTitles.daily}
           items={grouped.daily}
           completedMap={completedMap}
           pendingHabitIds={pendingHabitIds}
@@ -1302,8 +1293,7 @@ export function ResetDashboard({
 
         <Checklist
           id="night"
-          title={routineLabels.night}
-          displayTitle={routineTitles.night}
+          title={routineTitles.night}
           items={grouped.night}
           completedMap={completedMap}
           pendingHabitIds={pendingHabitIds}
@@ -1313,8 +1303,7 @@ export function ResetDashboard({
 
         <Checklist
           id="trust_based"
-          title={routineLabels.trust_based}
-          displayTitle={routineTitles.trust_based}
+          title={routineTitles.trust_based}
           items={grouped.trust_based}
           completedMap={completedMap}
           pendingHabitIds={pendingHabitIds}
@@ -1717,7 +1706,6 @@ function JumpButton({
 function Checklist({
   id,
   title,
-  displayTitle,
   items,
   completedMap,
   pendingHabitIds,
@@ -1726,7 +1714,6 @@ function Checklist({
 }: {
   id: string;
   title: string;
-  displayTitle: string;
   items: Habit[];
   completedMap: Record<string, boolean>;
   pendingHabitIds: Set<string>;
@@ -1765,12 +1752,9 @@ function Checklist({
           <div>
             <p
               id={`${id}-title`}
-              className="terminal-green text-xs uppercase tracking-[0.2em]"
+              className="terminal-green text-sm tracking-[0.08em]"
             >
               &gt; {title}
-            </p>
-            <p className="terminal-muted mt-1 text-xs">
-              {displayTitle}
             </p>
           </div>
 
@@ -1794,7 +1778,7 @@ function Checklist({
                 {category}
               </p>
 
-              {categoryItems.map((item, index) => {
+              {categoryItems.map((item) => {
                 const completed = Boolean(
                   completedMap[item.id]
                 );
@@ -1819,14 +1803,8 @@ function Checklist({
                         ? "Unlock today to edit this protocol."
                         : undefined
                     }
-                    className="terminal-line grid min-h-[52px] w-full grid-cols-[28px_34px_1fr] items-center gap-2 py-2.5 text-left text-xs transition hover:text-[#39ff88] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#39ff88] focus-visible:ring-inset disabled:cursor-default disabled:opacity-55 disabled:hover:text-inherit sm:grid-cols-[32px_36px_1fr]"
+                    className="terminal-line grid min-h-[52px] w-full grid-cols-[34px_1fr] items-center gap-2 py-2.5 text-left text-xs transition hover:text-[#39ff88] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#39ff88] focus-visible:ring-inset disabled:cursor-default disabled:opacity-55 disabled:hover:text-inherit sm:grid-cols-[36px_1fr]"
                   >
-                    <span className="terminal-dim leading-6">
-                      {String(index + 1).padStart(
-                        2,
-                        "0"
-                      )}
-                    </span>
 
                     <span className="terminal-green whitespace-nowrap leading-6">
                       {isSaving

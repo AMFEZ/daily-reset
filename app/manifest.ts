@@ -6,6 +6,7 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: "Daily Reset",
     description:
       "A private daily protocol, reflection, and consistency system.",
+    id: "/",
     start_url: "/",
     scope: "/",
     display: "standalone",

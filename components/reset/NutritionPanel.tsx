@@ -291,11 +291,6 @@ export function NutritionPanel({
     <TerminalBlock title="nutrition.input">
       <div className="grid gap-4 md:grid-cols-[1fr_0.8fr]">
         <div>
-          <p className="terminal-muted mb-3 text-xs leading-6">
-            &gt; Add protein as you eat it. Undo removes
-            the newest signal; reset removes every protein
-            signal saved today.
-          </p>
 
           <div className="grid gap-3 sm:grid-cols-[1fr_160px]">
             <label className="block">
@@ -308,7 +303,6 @@ export function NutritionPanel({
                   setAmount(event.target.value)
                 }
                 inputMode="numeric"
-                placeholder="25"
                 className={inputClassName}
               />
             </label>
@@ -351,7 +345,6 @@ export function NutritionPanel({
               onChange={(event) =>
                 setNote(event.target.value)
               }
-              placeholder="eggs, shake, chicken..."
               className={inputClassName}
             />
           </label>
@@ -457,10 +450,6 @@ export function NutritionPanel({
                   key={`${log.id}-${log.created_at}-${index}`}
                   title={`${log.amount}g · ${log.meal_type}`}
                   meta={log.date}
-                  preview={
-                    log.note ??
-                    "Protein signal"
-                  }
                 >
                   <div className="grid gap-3 sm:grid-cols-[100px_70px_1fr_auto] sm:items-center">
                     <span className="terminal-muted">
@@ -523,24 +512,13 @@ function FieldLabel({
 }
 
 function TerminalBlock({
-  title,
   children,
 }: {
   title: string;
   children: React.ReactNode;
 }) {
-  return (
-    <section className="border border-[#242424] bg-[#050505]">
-      <div className="border-b border-[#242424] bg-[#0d0d0d] px-3 py-2">
-        <p className="terminal-green text-xs uppercase tracking-[0.2em]">
-          &gt; {title}
-        </p>
-      </div>
-      <div className="p-3">{children}</div>
-    </section>
-  );
+  return <div className="p-3">{children}</div>;
 }
-
 function TerminalRow({
   label,
   value,

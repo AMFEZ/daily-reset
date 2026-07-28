@@ -162,11 +162,6 @@ export function BodyDataPanel({
     <TerminalBlock title="body.data">
       <div className="grid gap-4 lg:grid-cols-[1fr_0.8fr]">
         <div>
-          <p className="terminal-muted mb-3 text-xs leading-6">
-            &gt; Body data always saves to the
-            current app day. Saving again updates
-            today instead of creating a duplicate.
-          </p>
 
           <div className="grid gap-3 sm:grid-cols-[1fr_1fr_150px]">
             <div className="border border-[#242424] bg-[#080808] px-3 py-3">
@@ -188,7 +183,6 @@ export function BodyDataPanel({
                   )
                 }
                 inputMode="decimal"
-                placeholder="175.0"
                 className={inputClassName}
               />
             </label>
@@ -283,10 +277,6 @@ export function BodyDataPanel({
                     key={`${log.id}-${log.date}-${index}`}
                     title={`${log.weight} ${log.unit}`}
                     meta={log.date}
-                    preview={
-                      log.note ??
-                      "Body signal"
-                    }
                   >
                     <div className="grid gap-2 sm:grid-cols-[110px_100px_1fr]">
                       <span className="terminal-muted">
@@ -333,26 +323,13 @@ function FieldLabel({
 }
 
 function TerminalBlock({
-  title,
   children,
 }: {
   title: string;
   children: React.ReactNode;
 }) {
-  return (
-    <section className="border border-[#242424] bg-[#050505]">
-      <div className="border-b border-[#242424] bg-[#0d0d0d] px-3 py-2">
-        <p className="terminal-green text-xs uppercase tracking-[0.2em]">
-          &gt; {title}
-        </p>
-      </div>
-      <div className="p-3">
-        {children}
-      </div>
-    </section>
-  );
+  return <div className="p-3">{children}</div>;
 }
-
 function TerminalRow({
   label,
   value,

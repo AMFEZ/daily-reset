@@ -431,10 +431,6 @@ export function DreamArchivePanel({
 
   return (
     <TerminalBlock title="dream.archive">
-      <p className="terminal-muted text-xs leading-6">
-        &gt; Capture the dream in writing, audio, or
-        transcript. Fragments count.
-      </p>
 
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <label className="block">
@@ -446,7 +442,6 @@ export function DreamArchivePanel({
             onChange={(event) =>
               setTitle(event.target.value)
             }
-            placeholder="The flooded apartment..."
             className={inputClassName}
           />
         </label>
@@ -458,7 +453,6 @@ export function DreamArchivePanel({
             onChange={(event) =>
               setSymbols(event.target.value)
             }
-            placeholder="water, teeth, cat..."
             className={inputClassName}
           />
         </label>
@@ -472,7 +466,6 @@ export function DreamArchivePanel({
             onChange={(event) =>
               setPeople(event.target.value)
             }
-            placeholder="friend, stranger..."
             className={inputClassName}
           />
         </label>
@@ -484,7 +477,6 @@ export function DreamArchivePanel({
             onChange={(event) =>
               setPlaces(event.target.value)
             }
-            placeholder="subway, bedroom..."
             className={inputClassName}
           />
         </label>
@@ -497,7 +489,6 @@ export function DreamArchivePanel({
           onChange={(event) =>
             setContent(event.target.value)
           }
-          placeholder="Record everything you remember..."
           className={`${inputClassName} min-h-[220px] resize-y leading-6`}
         />
       </label>
@@ -588,7 +579,6 @@ export function DreamArchivePanel({
                   )
                 }
                 className={`${inputClassName} min-h-[110px] resize-y leading-6`}
-                placeholder="Speech-to-text or manual transcript..."
               />
             </label>
             <label className="block">
@@ -603,7 +593,6 @@ export function DreamArchivePanel({
                   )
                 }
                 className={`${inputClassName} min-h-[110px] resize-y leading-6`}
-                placeholder="Cleaned dream text..."
               />
             </label>
           </div>
@@ -634,7 +623,7 @@ export function DreamArchivePanel({
           count={sortedEntries.length}
           summary="Dream history, transcripts, and interpretations"
         >
-          <div className="max-h-[680px] overflow-y-auto border border-[#242424]">
+          <div className="min-w-0 max-w-full overflow-hidden border border-[#242424] sm:max-h-[680px] sm:overflow-y-auto">
             {sortedEntries.length > 0 ? (
               sortedEntries.map(
                 (entry, index) => {
@@ -666,9 +655,8 @@ export function DreamArchivePanel({
                         "Untitled Dream"
                       }
                       meta={timestamp}
-                      preview={preview}
                     >
-                      <p className="whitespace-pre-wrap leading-6">
+                      <p className="max-w-full whitespace-pre-wrap break-words leading-6 [overflow-wrap:anywhere]">
                         {preview}
                       </p>
 
@@ -910,25 +898,13 @@ function FieldLabel({
 }
 
 function TerminalBlock({
-  title,
   children,
 }: {
   title: string;
-  children: ReactNode;
+  children: React.ReactNode;
 }) {
-  return (
-    <section className="border border-[#242424] bg-[#000000]">
-      <div className="border-b border-[#242424] bg-[#050505] px-3 py-2">
-        <p className="terminal-green text-xs uppercase tracking-[0.2em]">
-          &gt; {title}
-        </p>
-      </div>
-      <div className="p-3">{children}</div>
-    </section>
-  );
+  return <div className="p-3">{children}</div>;
 }
-
-
 function getLocalDateKey() {
   const date = new Date();
   const year = date.getFullYear();

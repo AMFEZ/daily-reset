@@ -5,7 +5,7 @@ import { useState } from "react";
 type ModuleAccordionProps = {
   id: string;
   title: string;
-  subtitle: string;
+  subtitle?: string;
   children: React.ReactNode;
   defaultOpen?: boolean;
 };
@@ -13,7 +13,6 @@ type ModuleAccordionProps = {
 export function ModuleAccordion({
   id,
   title,
-  subtitle,
   children,
   defaultOpen = false,
 }: ModuleAccordionProps) {
@@ -34,10 +33,9 @@ export function ModuleAccordion({
         className="flex w-full items-center justify-between gap-4 border-b border-[#242424] bg-[#050505] px-4 py-3 text-left transition hover:bg-[#080808]"
       >
         <div className="min-w-0">
-          <p className="terminal-green break-words text-xs uppercase tracking-[0.22em]">
+          <p className="terminal-green break-words text-sm tracking-[0.08em]">
             &gt; {title}
           </p>
-          <p className="terminal-muted mt-1 break-words text-xs">{subtitle}</p>
         </div>
 
         <span className="terminal-green shrink-0 text-xs">

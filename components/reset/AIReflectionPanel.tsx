@@ -172,11 +172,6 @@ export function AIReflectionPanel({
 
   return (
     <TerminalBlock title="ai.reflection.workspace">
-      <p className="terminal-muted text-xs leading-6">
-        &gt; Select a saved signal and generate a
-        grounded pattern review. Reflection and Shadow
-        capture remain free of automatic interpretation.
-      </p>
 
       <label className="mt-3 block">
         <FieldLabel>Source signal</FieldLabel>
@@ -381,20 +376,10 @@ function FieldLabel({
 }
 
 function TerminalBlock({
-  title,
   children,
 }: {
   title: string;
   children: React.ReactNode;
 }) {
-  return (
-    <section className="border border-[#242424] bg-[#050505]">
-      <div className="border-b border-[#242424] bg-[#0d0d0d] px-3 py-2">
-        <p className="terminal-green text-xs uppercase tracking-[0.2em]">
-          &gt; {title}
-        </p>
-      </div>
-      <div className="p-3">{children}</div>
-    </section>
-  );
+  return <div className="p-3">{children}</div>;
 }

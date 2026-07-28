@@ -88,6 +88,98 @@ export type Database = {
           },
         ]
       }
+      daily_reset_push_deliveries: {
+        Row: {
+          attempt_count: number
+          created_at: string
+          delivered_at: string | null
+          error_message: string | null
+          id: string
+          local_date: string
+          reminder_key: string
+          status: string
+          subscription_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          attempt_count?: number
+          created_at?: string
+          delivered_at?: string | null
+          error_message?: string | null
+          id?: string
+          local_date: string
+          reminder_key: string
+          status?: string
+          subscription_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          attempt_count?: number
+          created_at?: string
+          delivered_at?: string | null
+          error_message?: string | null
+          id?: string
+          local_date?: string
+          reminder_key?: string
+          status?: string
+          subscription_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "daily_reset_push_deliveries_subscription_id_fkey"
+            columns: ["subscription_id"]
+            isOneToOne: false
+            referencedRelation: "daily_reset_push_subscriptions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      daily_reset_push_subscriptions: {
+        Row: {
+          auth_secret: string
+          created_at: string
+          enabled: boolean
+          endpoint: string
+          expiration_time: string | null
+          id: string
+          last_seen_at: string
+          p256dh: string
+          updated_at: string
+          user_agent: string | null
+          user_id: string
+        }
+        Insert: {
+          auth_secret: string
+          created_at?: string
+          enabled?: boolean
+          endpoint: string
+          expiration_time?: string | null
+          id?: string
+          last_seen_at?: string
+          p256dh: string
+          updated_at?: string
+          user_agent?: string | null
+          user_id: string
+        }
+        Update: {
+          auth_secret?: string
+          created_at?: string
+          enabled?: boolean
+          endpoint?: string
+          expiration_time?: string | null
+          id?: string
+          last_seen_at?: string
+          p256dh?: string
+          updated_at?: string
+          user_agent?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       daily_reset_reminders: {
         Row: {
           created_at: string

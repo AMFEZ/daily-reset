@@ -33,6 +33,7 @@ import { ShadowConsolePanel } from "@/components/reset/ShadowConsolePanel";
 import { SignalDisclosure } from "@/components/reset/SignalDisclosure";
 import { WeeklyResetPanel } from "@/components/reset/WeeklyResetPanel";
 import { BootWarningPanel } from "@/components/system/BootWarningPanel";
+import { DayRolloverController } from "@/components/system/DayRolloverController";
 import { calculateResetStreak } from "@/utils/reset-streak";
 import { createClient } from "@/utils/supabase/server";
 
@@ -831,6 +832,10 @@ export default async function Home() {
           </div>
 
           <PWAController />
+          <DayRolloverController
+            serverDayKey={today}
+            timeZone={initialSettings.timezone}
+          />
           <SettingsRuntime
             initialSettings={initialSettings}
           />
@@ -844,6 +849,7 @@ export default async function Home() {
             />
 
             <ResetDashboard
+              key={today}
               userEmail={user.email ?? "ONLINE"}
               habits={visibleHabits}
               logs={normalizedLogs}
@@ -887,8 +893,7 @@ export default async function Home() {
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 <ModuleAccordion
                   id="body-data"
-                  title="body.data"
-                  subtitle="Daily weight tracking and trend signals"
+                  title="Body Data"
                 >
                   <BodyDataPanel
                     timeZone={
@@ -908,8 +913,7 @@ export default async function Home() {
 
                 <ModuleAccordion
                   id="nutrition-input"
-                  title="nutrition.input"
-                  subtitle="Protein tracker and nutrition signals"
+                  title="Nutrition"
                 >
                   <NutritionPanel
                     initialLogs={(proteinLogs ?? []).map(
@@ -935,8 +939,7 @@ export default async function Home() {
 
                 <ModuleAccordion
                   id="reprogram-journal"
-                  title="reprogram.journal"
-                  subtitle="Desires, emotional signals, and belief reconstruction"
+                  title="Reprogram Journal"
                 >
                   <ReprogramJournalPanel
                     userId={user.id}
@@ -1011,8 +1014,7 @@ export default async function Home() {
 
                 <ModuleAccordion
                   id="shadow-console"
-                  title="shadow.console"
-                  subtitle="One deep prompt with writing, voice, and transcript"
+                  title="Shadow Work"
                 >
                   <ShadowConsolePanel
                     initialEntries={shadowEntries.map(
@@ -1040,8 +1042,7 @@ export default async function Home() {
 
                 <ModuleAccordion
                   id="dream-archive"
-                  title="dream.archive"
-                  subtitle="Dream journal and symbol capture"
+                  title="Dream Archive"
                 >
                   <DreamArchivePanel
                     initialEntries={dreamEntries.map(
@@ -1098,8 +1099,7 @@ export default async function Home() {
 
                 <ModuleAccordion
                   id="ai-reflection"
-                  title="ai.reflection.workspace"
-                  subtitle="Guided pattern review and grounded actions"
+                  title="AI Reflection"
                 >
                   <AIReflectionPanel
                     entries={(journalEntries ?? []).map(
@@ -1156,8 +1156,7 @@ export default async function Home() {
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   <ModuleAccordion
                     id="reminder-center"
-                    title="reminder.center"
-                    subtitle="Cloud-synced routine notification schedule"
+                    title="Reminders"
                   >
                     <ReminderSettingsPanel
                       initialReminders={
@@ -1168,8 +1167,7 @@ export default async function Home() {
 
                   <ModuleAccordion
                     id="protocol-manager"
-                    title="protocol.manager"
-                    subtitle="Create, edit, reorder, disable, and restore protocols"
+                    title="Protocol Manager"
                   >
                     <ProtocolManagerPanel
                       initialProtocols={
@@ -1180,8 +1178,7 @@ export default async function Home() {
 
                   <ModuleAccordion
                     id="settings-account"
-                    title="settings.account"
-                    subtitle="Preferences, timezone, display, and password"
+                    title="Settings & Account"
                   >
                     <SettingsAccountPanel
                       userEmail={
@@ -1195,24 +1192,21 @@ export default async function Home() {
 
                   <ModuleAccordion
                     id="data-safety"
-                    title="data.safety"
-                    subtitle="Authenticated backup, inventory, and checksum"
+                    title="Data Safety"
                   >
                     <DataSafetyPanel />
                   </ModuleAccordion>
 
                   <ModuleAccordion
                     id="release-readiness"
-                    title="release.readiness"
-                    subtitle="Automated health checks and V1 deployment audit"
+                    title="Release Readiness"
                   >
                     <ReleaseReadinessPanel />
                   </ModuleAccordion>
 
                   <ModuleAccordion
                     id="deployment-control"
-                    title="deployment.control"
-                    subtitle="Version, environment, PWA, and production status"
+                    title="Deployment"
                   >
                     <ProductionDeploymentPanel />
                   </ModuleAccordion>
@@ -1221,8 +1215,7 @@ export default async function Home() {
                 <div className="mt-3">
                   <ModuleAccordion
                     id="reset-analytics"
-                    title="reset.analytics"
-                    subtitle={`${streakStats.currentStreak}-day current streak · ${streakStats.bestStreak}-day best · ${streakStats.savedLast7}/7 saved recently`}
+                    title="Reset Analytics"
                   >
                     <div className="space-y-3">
                       <SignalDisclosure

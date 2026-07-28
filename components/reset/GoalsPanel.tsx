@@ -201,7 +201,6 @@ export function GoalsPanel({
               label="Goal"
               value={title}
               onChange={setTitle}
-              placeholder="Reach 170 lbs"
             />
 
             <label className="block">
@@ -245,7 +244,6 @@ export function GoalsPanel({
               label="Unit"
               value={unit}
               onChange={setUnit}
-              placeholder="lbs, books, steps..."
             />
 
             <Field

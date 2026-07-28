@@ -319,10 +319,6 @@ export function ShadowConsolePanel({
 
   return (
     <TerminalBlock title="shadow.console">
-      <p className="terminal-muted text-xs leading-6">
-        &gt; One prompt. One honest response. Write
-        it or speak it.
-      </p>
 
       <div className="mt-3 border border-[#39ff88] bg-[#000000] p-4">
         <p className="terminal-muted text-[10px] uppercase tracking-[0.18em]">
@@ -340,7 +336,6 @@ export function ShadowConsolePanel({
           onChange={(event) =>
             setResponse(event.target.value)
           }
-          placeholder="Write the answer underneath the first answer..."
           className={`${inputClassName} min-h-[220px] resize-y leading-6`}
         />
       </label>
@@ -356,7 +351,6 @@ export function ShadowConsolePanel({
               event.target.value
             )
           }
-          placeholder="What will you do with this awareness?"
           className={inputClassName}
         />
       </label>
@@ -463,7 +457,6 @@ export function ShadowConsolePanel({
                         "Shadow Entry"
                       }
                       meta={timestamp}
-                      preview={entry.content}
                     >
                       <p className="whitespace-pre-wrap leading-6">
                         {entry.content}
@@ -613,7 +606,6 @@ function TranscriptFields({
             )
           }
           className={`${inputClassName} min-h-[110px] resize-y leading-6`}
-          placeholder="Speech-to-text or manual transcript..."
         />
       </label>
       <label className="mt-3 block">
@@ -628,7 +620,6 @@ function TranscriptFields({
             )
           }
           className={`${inputClassName} min-h-[110px] resize-y leading-6`}
-          placeholder="Cleaned version..."
         />
       </label>
     </div>
@@ -686,25 +677,13 @@ function FieldLabel({
 }
 
 function TerminalBlock({
-  title,
   children,
 }: {
   title: string;
   children: React.ReactNode;
 }) {
-  return (
-    <section className="border border-[#242424] bg-[#050505]">
-      <div className="border-b border-[#242424] bg-[#0d0d0d] px-3 py-2">
-        <p className="terminal-green text-xs uppercase tracking-[0.2em]">
-          &gt; {title}
-        </p>
-      </div>
-      <div className="p-3">{children}</div>
-    </section>
-  );
+  return <div className="p-3">{children}</div>;
 }
-
-
 function getLocalDateKey() {
   const date = new Date();
   const year = date.getFullYear();
