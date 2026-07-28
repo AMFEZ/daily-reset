@@ -28,7 +28,6 @@ export function SettingsHub({
       );
 
     if (stored === "true") {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- Restore the browser-only persisted disclosure state.
       setIsOpen(true);
     }
   }, []);

@@ -70,8 +70,6 @@ export function ReprogramJournalPanel({
   initialEmotionLogs,
   initialBeliefs,
 }: ReprogramJournalPanelProps) {
-  const supabase = createClient();
-
   const [isPending, startTransition] =
     useTransition();
 

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useState,
@@ -91,6 +92,54 @@ export function DataSafetyPanel() {
     startDownloading,
   ] = useTransition();
 
+  const fetchSummary = useCallback(
+    async () => {
+      const response = await fetch(
+        "/api/export-data?mode=summary",
+        {
+          method: "GET",
+          cache: "no-store",
+          credentials: "same-origin",
+        }
+      );
+
+      const payload =
+        (await response.json()) as
+          | ExportSummary
+          | { error?: string };
+
+      if (!response.ok) {
+        throw new Error(
+          "error" in payload &&
+            payload.error
+            ? payload.error
+            : "Data inventory failed."
+        );
+      }
+
+      return payload as ExportSummary;
+    },
+    []
+  );
+
+  const refreshInventory =
+    useCallback(async () => {
+      setSummaryError(null);
+
+      try {
+        const nextSummary =
+          await fetchSummary();
+
+        setSummary(nextSummary);
+      } catch (error) {
+        setSummaryError(
+          error instanceof Error
+            ? error.message
+            : "Data inventory failed."
+        );
+      }
+    }, [fetchSummary]);
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- Hydrate browser-only export metadata after mount.
     setLastExportAt(
@@ -100,7 +149,7 @@ export function DataSafetyPanel() {
     );
 
     void refreshInventory();
-  }, []);
+  }, [refreshInventory]);
 
   const datasetEntries = useMemo(
     () =>
@@ -113,50 +162,6 @@ export function DataSafetyPanel() {
         : [],
     [summary]
   );
-
-  async function fetchSummary() {
-    const response = await fetch(
-      "/api/export-data?mode=summary",
-      {
-        method: "GET",
-        cache: "no-store",
-        credentials: "same-origin",
-      }
-    );
-
-    const payload =
-      (await response.json()) as
-        | ExportSummary
-        | { error?: string };
-
-    if (!response.ok) {
-      throw new Error(
-        "error" in payload &&
-          payload.error
-          ? payload.error
-          : "Data inventory failed."
-      );
-    }
-
-    return payload as ExportSummary;
-  }
-
-  async function refreshInventory() {
-    setSummaryError(null);
-
-    try {
-      const nextSummary =
-        await fetchSummary();
-
-      setSummary(nextSummary);
-    } catch (error) {
-      setSummaryError(
-        error instanceof Error
-          ? error.message
-          : "Data inventory failed."
-      );
-    }
-  }
 
   function handleRefresh() {
     startRefreshing(async () => {

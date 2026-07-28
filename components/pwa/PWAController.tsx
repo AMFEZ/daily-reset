@@ -65,9 +65,7 @@ export function PWAController() {
     setIsStandalone(
       standalone
     );
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- Browser-only platform state is available after mount.
     setIsIOS(ios);
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- Browser-only dismissal state is restored after mount.
     setIsDismissed(
       window.localStorage.getItem(
         DISMISS_KEY

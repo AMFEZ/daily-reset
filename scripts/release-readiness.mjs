@@ -147,21 +147,71 @@ function runScript(
     return;
   }
 
+  const npmExecPath =
+    process.env.npm_execpath;
+
+  let command;
+  let args;
+
+  if (npmExecPath) {
+    command = process.execPath;
+    args = [
+      npmExecPath,
+      "run",
+      scriptName,
+    ];
+  } else if (
+    process.platform === "win32"
+  ) {
+    command =
+      process.env.ComSpec ??
+      "cmd.exe";
+    args = [
+      "/d",
+      "/s",
+      "/c",
+      `npm run ${scriptName}`,
+    ];
+  } else {
+    command = "npm";
+    args = [
+      "run",
+      scriptName,
+    ];
+  }
+
   const result = spawnSync(
-    "npm",
-    ["run", scriptName],
+    command,
+    args,
     {
       cwd: root,
       stdio: "inherit",
-      shell: true,
+      shell: false,
       env: process.env,
     }
   );
 
+  if (result.error) {
+    fail(
+      `npm run ${scriptName} could not start: ${
+        result.error.message
+      }`
+    );
+    return;
+  }
+
   if (result.status === 0) {
     pass(`npm run ${scriptName}`);
   } else {
-    fail(`npm run ${scriptName}`);
+    fail(
+      `npm run ${scriptName} exited with code ${
+        result.status ?? "unknown"
+      }${
+        result.signal
+          ? ` and signal ${result.signal}`
+          : ""
+      }`
+    );
   }
 }
 

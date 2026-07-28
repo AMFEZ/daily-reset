@@ -555,20 +555,22 @@ export function ResetDashboard({
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- Synchronize local live metric state when server props change.
     setLiveLatestWeight(latestWeight);
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- Synchronize the local display unit when server props change.
     setLiveWeightUnit(weightUnit);
   }, [latestWeight, weightUnit]);
 
   useEffect(() => {
     isMountedRef.current = true;
 
+    const requestIds =
+      metricRefreshRequestIds.current;
+    const refreshTimers =
+      metricRefreshTimers.current;
+
     return () => {
       isMountedRef.current = false;
       habitRefreshRequestId.current += 1;
-      metricRefreshRequestIds.current
-        .weight += 1;
-      metricRefreshRequestIds.current
-        .protein += 1;
+      requestIds.weight += 1;
+      requestIds.protein += 1;
 
       for (
         const metric of [
@@ -577,15 +579,11 @@ export function ResetDashboard({
         ] as const
       ) {
         const timer =
-          metricRefreshTimers.current[
-            metric
-          ];
+          refreshTimers[metric];
 
         if (timer) {
           window.clearTimeout(timer);
-          metricRefreshTimers.current[
-            metric
-          ] = null;
+          refreshTimers[metric] = null;
         }
       }
     };

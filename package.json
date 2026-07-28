@@ -10,7 +10,12 @@
     "types:generate": "node scripts/generate-database-types.mjs",
     "types:check": "npm run types:generate && git diff --exit-code -- types/database.types.ts",
     "release:check": "node scripts/release-readiness.mjs",
-    "push:keys": "node scripts/generate-vapid-keys.mjs"
+    "push:keys": "node scripts/generate-vapid-keys.mjs",
+    "cleanup:legacy": "node scripts/cleanup-legacy-files.mjs",
+    "diagnostics": "node scripts/push-diagnostics.mjs",
+    "diagnostics:production": "node scripts/push-diagnostics.mjs --url=https://daily-reset-black.vercel.app",
+    "smoke:test": "node scripts/smoke-test.mjs",
+    "smoke:production": "node scripts/smoke-test.mjs --url=https://daily-reset-black.vercel.app"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.1",
