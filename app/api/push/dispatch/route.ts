@@ -1,3 +1,6 @@
+import {
+  timingSafeEqual,
+} from "node:crypto";
 import type {
   SupabaseClient,
 } from "@supabase/supabase-js";
@@ -87,20 +90,33 @@ async function dispatchPushReminders(
   request: Request
 ) {
   const expectedSecret =
-    process.env.CRON_SECRET;
-  const authorization =
-    request.headers.get(
-      "authorization"
+    normalizeCronSecret(
+      process.env.CRON_SECRET
     );
+  const providedSecret =
+    getProvidedCronSecret(request);
 
   if (
     !expectedSecret ||
-    authorization !==
-      `Bearer ${expectedSecret}`
+    !providedSecret ||
+    !cronSecretsMatch(
+      expectedSecret,
+      providedSecret
+    )
   ) {
     return Response.json(
       {
         error: "Unauthorized.",
+        diagnostic: {
+          secretConfigured:
+            Boolean(expectedSecret),
+          authorizationReceived:
+            Boolean(providedSecret),
+          expectedLength:
+            expectedSecret.length,
+          receivedLength:
+            providedSecret.length,
+        },
       },
       {
         status: 401,
@@ -502,6 +518,93 @@ function getZonedClock(
       values.minute ?? 0
     ),
   };
+}
+
+function getProvidedCronSecret(
+  request: Request
+) {
+  const authorization =
+    request.headers
+      .get("authorization")
+      ?.trim();
+
+  if (authorization) {
+    const bearerMatch =
+      authorization.match(
+        /^Bearer\s+(.+)$/iu
+      );
+
+    if (bearerMatch?.[1]) {
+      return normalizeCronSecret(
+        bearerMatch[1]
+      );
+    }
+  }
+
+  return normalizeCronSecret(
+    request.headers.get(
+      "x-cron-secret"
+    )
+  );
+}
+
+function normalizeCronSecret(
+  value: string | null | undefined
+) {
+  if (!value) {
+    return "";
+  }
+
+  let normalized = value.trim();
+
+  if (
+    normalized.startsWith(
+      "CRON_SECRET="
+    )
+  ) {
+    normalized = normalized
+      .slice("CRON_SECRET=".length)
+      .trim();
+  }
+
+  if (
+    normalized.length >= 2 &&
+    (
+      (
+        normalized.startsWith('"') &&
+        normalized.endsWith('"')
+      ) ||
+      (
+        normalized.startsWith("'") &&
+        normalized.endsWith("'")
+      )
+    )
+  ) {
+    normalized = normalized
+      .slice(1, -1)
+      .trim();
+  }
+
+  return normalized;
+}
+
+function cronSecretsMatch(
+  expected: string,
+  provided: string
+) {
+  const expectedBuffer =
+    Buffer.from(expected, "utf8");
+  const providedBuffer =
+    Buffer.from(provided, "utf8");
+
+  return (
+    expectedBuffer.length ===
+      providedBuffer.length &&
+    timingSafeEqual(
+      expectedBuffer,
+      providedBuffer
+    )
+  );
 }
 
 function noStoreHeaders() {
