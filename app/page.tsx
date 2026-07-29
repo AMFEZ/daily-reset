@@ -533,9 +533,9 @@ export default async function Home() {
       "Journal archive",
       supabase
         .from("journal_entries")
-        .select(
-          "id, entry_type, title, content, mood, energy, tags, audio_path, raw_transcript, cleaned_transcript, created_at"
-        )
+.select(
+  "id, entry_type, title, content, mood, energy, tags, symbols, audio_path, raw_transcript, cleaned_transcript, created_at"
+)
         .order("created_at", {
           ascending: false,
         })
@@ -1017,27 +1017,48 @@ export default async function Home() {
                   title="Shadow Work"
                 >
                   <ShadowConsolePanel
-                    initialEntries={shadowEntries.map(
-                      (entry) => ({
-                        id: entry.id,
-                        entry_type: "shadow",
-                        title: entry.title,
-                        content:
-                          entry.content ?? "",
-                        mood: entry.mood,
-                        energy: entry.energy,
-                        tags: entry.tags,
-                        audio_path:
-                          entry.audio_path,
-                        raw_transcript:
-                          entry.raw_transcript,
-                        cleaned_transcript:
-                          entry.cleaned_transcript,
-                        created_at:
-                          entry.created_at,
-                      })
-                    )}
-                  />
+  initialEntries={shadowEntries.map(
+    (entry) => ({
+      id: entry.id,
+      entry_type: "shadow",
+      title: entry.title,
+      content: entry.content ?? "",
+      mood: entry.mood,
+      energy: entry.energy,
+      tags: entry.tags,
+      audio_path: entry.audio_path,
+      raw_transcript:
+        entry.raw_transcript,
+      cleaned_transcript:
+        entry.cleaned_transcript,
+      created_at: entry.created_at,
+    })
+  )}
+  initialReflections={(aiReflections ?? [])
+    .filter(
+      (reflection) =>
+        reflection.reflection_type ===
+        "shadow"
+    )
+    .map((reflection) => ({
+      id: reflection.id,
+      journal_entry_id:
+        reflection.journal_entry_id ?? "",
+      reflection_type:
+        "shadow" as const,
+      summary: reflection.summary,
+      pattern_noticed:
+        reflection.pattern_noticed,
+      compassionate_reframe:
+        reflection.compassionate_reframe,
+      questions: reflection.questions,
+      action_step:
+        reflection.action_step,
+      model: reflection.model,
+      created_at:
+        reflection.created_at,
+    }))}
+/>
                 </ModuleAccordion>
 
                 <ModuleAccordion
@@ -1045,25 +1066,25 @@ export default async function Home() {
                   title="Dream Archive"
                 >
                   <DreamArchivePanel
-                    initialEntries={dreamEntries.map(
-                      (entry) => ({
-                        id: entry.id,
-                        entry_type: "dream",
-                        title: entry.title,
-                        content:
-                          entry.content ?? "",
-                        mood: entry.mood,
-                        energy: entry.energy,
-                        tags: entry.tags,
-                        audio_path: entry.audio_path,
-                        raw_transcript:
-                          entry.raw_transcript,
-                        cleaned_transcript:
-                          entry.cleaned_transcript,
-                        created_at: entry.created_at,
-                      })
-                    )}
-                    initialInterpretations={dreamInterpretations.map(
+  initialEntries={dreamEntries.map(
+    (entry) => ({
+      id: entry.id,
+      entry_type: "dream",
+      title: entry.title,
+      content: entry.content ?? "",
+      mood: entry.mood,
+      energy: entry.energy,
+      tags: entry.tags,
+      symbols: entry.symbols,
+      audio_path: entry.audio_path,
+      raw_transcript:
+        entry.raw_transcript,
+      cleaned_transcript:
+        entry.cleaned_transcript,
+      created_at: entry.created_at,
+    })
+  )}
+  initialInterpretations={dreamInterpretations.map(
                       (interpretation) => ({
                         id: interpretation.id,
                         journal_entry_id:

@@ -11,25 +11,42 @@ type TranscribeDreamBody = {
   audioPath: string;
 };
 
-export async function POST(request: Request) {
+export async function POST(
+  request: Request
+) {
   try {
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json(
-        { error: "Missing OPENAI_API_KEY." },
-        { status: 500 }
+        {
+          error:
+            "Missing OPENAI_API_KEY.",
+        },
+        {
+          status: 500,
+        }
       );
     }
 
-    const body = (await request.json()) as TranscribeDreamBody;
+    const body =
+      (await request.json()) as TranscribeDreamBody;
 
-    if (!body.journalEntryId || !body.audioPath) {
+    if (
+      !body.journalEntryId ||
+      !body.audioPath
+    ) {
       return NextResponse.json(
-        { error: "Missing journalEntryId or audioPath." },
-        { status: 400 }
+        {
+          error:
+            "Missing journalEntryId or audioPath.",
+        },
+        {
+          status: 400,
+        }
       );
     }
 
-    const supabase = await createClient();
+    const supabase =
+      await createClient();
 
     const {
       data: { user },
@@ -38,78 +55,169 @@ export async function POST(request: Request) {
 
     if (userError || !user) {
       return NextResponse.json(
-        { error: "Not authenticated." },
-        { status: 401 }
+        {
+          error: "Not authenticated.",
+        },
+        {
+          status: 401,
+        }
       );
     }
 
-    const { data: entry, error: entryError } = await supabase
+    const {
+      data: entry,
+      error: entryError,
+    } = await supabase
       .from("journal_entries")
-      .select("id, user_id, audio_path")
-      .eq("id", body.journalEntryId)
+      .select(
+        "id, user_id, audio_path"
+      )
+      .eq(
+        "id",
+        body.journalEntryId
+      )
       .eq("user_id", user.id)
       .eq("entry_type", "dream")
       .single();
 
     if (entryError || !entry) {
       return NextResponse.json(
-        { error: "Dream entry not found." },
-        { status: 404 }
+        {
+          error:
+            "Dream entry not found.",
+        },
+        {
+          status: 404,
+        }
       );
     }
 
-    if (entry.audio_path !== body.audioPath) {
+    if (
+      entry.audio_path !==
+      body.audioPath
+    ) {
       return NextResponse.json(
-        { error: "Audio path does not match dream entry." },
-        { status: 400 }
+        {
+          error:
+            "Audio path does not match dream entry.",
+        },
+        {
+          status: 400,
+        }
       );
     }
 
-    const { data: audioBlob, error: downloadError } = await supabase.storage
+    const {
+      data: audioBlob,
+      error: downloadError,
+    } = await supabase.storage
       .from("dream-audio")
       .download(body.audioPath);
 
-    if (downloadError || !audioBlob) {
+    if (
+      downloadError ||
+      !audioBlob
+    ) {
       return NextResponse.json(
-        { error: downloadError?.message ?? "Audio download failed." },
-        { status: 500 }
+        {
+          error:
+            downloadError?.message ??
+            "Audio download failed.",
+        },
+        {
+          status: 500,
+        }
       );
     }
 
-    const audioFile = new File([audioBlob], "dream.webm", {
-      type: audioBlob.type || "audio/webm",
-    });
+    const audioFile = new File(
+      [audioBlob],
+      "dream.webm",
+      {
+        type:
+          audioBlob.type ||
+          "audio/webm",
+      }
+    );
 
-    const transcription = await openai.audio.transcriptions.create({
-      file: audioFile,
-      model: "gpt-4o-mini-transcribe",
-    });
+    const transcription =
+      await openai.audio.transcriptions.create(
+        {
+          file: audioFile,
+          model:
+            "gpt-4o-mini-transcribe",
+        }
+      );
 
-    const rawTranscript = transcription.text?.trim() ?? "";
+    const rawTranscript =
+      transcription.text?.trim() ??
+      "";
 
     if (!rawTranscript) {
       return NextResponse.json(
-        { error: "Transcription returned empty text." },
-        { status: 500 }
+        {
+          error:
+            "Transcription returned empty text.",
+        },
+        {
+          status: 500,
+        }
       );
     }
 
-    const cleanedTranscript = cleanDreamTranscript(rawTranscript);
+    const cleanedTranscript =
+      cleanDreamTranscript(
+        rawTranscript
+      );
 
-    const { error: updateError } = await supabase
-      .from("journal_entries")
-      .update({
-        raw_transcript: rawTranscript,
-        cleaned_transcript: cleanedTranscript,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", body.journalEntryId)
-      .eq("user_id", user.id);
+    const { error: updateError } =
+      await supabase
+        .from("journal_entries")
+        .update({
+          raw_transcript:
+            rawTranscript,
+          cleaned_transcript:
+            cleanedTranscript,
+          updated_at:
+            new Date().toISOString(),
+        })
+        .eq(
+          "id",
+          body.journalEntryId
+        )
+        .eq("user_id", user.id);
 
     if (updateError) {
       return NextResponse.json(
-        { error: updateError.message },
-        { status: 500 }
+        {
+          error:
+            updateError.message,
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    const {
+      error: reflectionError,
+    } = await supabase
+      .from("ai_reflections")
+      .delete()
+      .eq(
+        "journal_entry_id",
+        body.journalEntryId
+      )
+      .eq("user_id", user.id)
+      .eq(
+        "reflection_type",
+        "dream"
+      );
+
+    if (reflectionError) {
+      console.error(
+        "Old dream interpretation cleanup failed:",
+        reflectionError.message
       );
     }
 
@@ -118,19 +226,32 @@ export async function POST(request: Request) {
       cleanedTranscript,
     });
   } catch (error) {
-    console.error("Dream transcription failed:", error);
+    console.error(
+      "Dream transcription failed:",
+      error
+    );
 
     return NextResponse.json(
-      { error: "Dream transcription failed." },
-      { status: 500 }
+      {
+        error:
+          "Dream transcription failed.",
+      },
+      {
+        status: 500,
+      }
     );
   }
 }
 
-function cleanDreamTranscript(raw: string) {
+function cleanDreamTranscript(
+  raw: string
+) {
   return raw
     .replace(/\s+/g, " ")
-    .replace(/\bi was like\b/gi, "I was like")
+    .replace(
+      /\bi was like\b/gi,
+      "I was like"
+    )
     .replace(/\bi\b/g, "I")
     .trim();
 }

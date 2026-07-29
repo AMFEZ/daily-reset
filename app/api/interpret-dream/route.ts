@@ -23,12 +23,15 @@ type DreamInterpretationResult = {
   interpretation_note: string;
 };
 
-export async function POST(request: Request) {
+export async function POST(
+  request: Request
+) {
   try {
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json(
         {
-          error: "Missing OPENAI_API_KEY.",
+          error:
+            "Missing OPENAI_API_KEY.",
         },
         {
           status: 500,
@@ -42,7 +45,8 @@ export async function POST(request: Request) {
     if (!body.journalEntryId) {
       return NextResponse.json(
         {
-          error: "Missing journalEntryId.",
+          error:
+            "Missing journalEntryId.",
         },
         {
           status: 400,
@@ -50,7 +54,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const supabase = await createClient();
+    const supabase =
+      await createClient();
 
     const {
       data: { user },
@@ -74,9 +79,12 @@ export async function POST(request: Request) {
     } = await supabase
       .from("journal_entries")
       .select(
-        "id, user_id, entry_type, title, content, mood, tags, raw_transcript, cleaned_transcript"
+        "id, user_id, entry_type, title, content, mood, tags, audio_path, raw_transcript, cleaned_transcript"
       )
-      .eq("id", body.journalEntryId)
+      .eq(
+        "id",
+        body.journalEntryId
+      )
       .eq("user_id", user.id)
       .eq("entry_type", "dream")
       .single();
@@ -84,7 +92,8 @@ export async function POST(request: Request) {
     if (entryError || !entry) {
       return NextResponse.json(
         {
-          error: "Dream entry not found.",
+          error:
+            "Dream entry not found.",
         },
         {
           status: 404,
@@ -92,17 +101,25 @@ export async function POST(request: Request) {
       );
     }
 
+    const captureMode =
+      entry.audio_path
+        ? "voice"
+        : "manual";
+
     const dreamText =
-      entry.cleaned_transcript?.trim() ||
-      entry.raw_transcript?.trim() ||
-      entry.content?.trim() ||
-      "";
+      captureMode === "voice"
+        ? entry.cleaned_transcript?.trim() ||
+          entry.raw_transcript?.trim() ||
+          ""
+        : entry.content?.trim() || "";
 
     if (dreamText.length < 2) {
       return NextResponse.json(
         {
           error:
-            "Dream has no text to interpret.",
+            captureMode === "voice"
+              ? "Transcribe this voice dream before interpreting it."
+              : "Write the dream details before interpreting it.",
         },
         {
           status: 400,
@@ -116,6 +133,9 @@ export async function POST(request: Request) {
 
     const interpretationPrompt = `
 Interpret this dream using the requested structure.
+
+Capture method:
+${captureMode}
 
 Dream title:
 ${entry.title ?? "Untitled Dream"}
@@ -166,7 +186,8 @@ Return ONLY valid JSON with this exact shape:
       });
 
     const outputText =
-      response.output_text?.trim() ?? "";
+      response.output_text?.trim() ??
+      "";
 
     if (!outputText) {
       return NextResponse.json(
@@ -185,12 +206,32 @@ Return ONLY valid JSON with this exact shape:
         outputText
       );
 
-    const storedResponse =
-      JSON.stringify(
-        interpretation,
-        null,
-        2
+    const {
+      error: deleteError,
+    } = await supabase
+      .from("ai_reflections")
+      .delete()
+      .eq(
+        "journal_entry_id",
+        entry.id
+      )
+      .eq("user_id", user.id)
+      .eq(
+        "reflection_type",
+        "dream"
       );
+
+    if (deleteError) {
+      return NextResponse.json(
+        {
+          error:
+            deleteError.message,
+        },
+        {
+          status: 500,
+        }
+      );
+    }
 
     const {
       data: saved,
@@ -199,12 +240,16 @@ Return ONLY valid JSON with this exact shape:
       .from("ai_reflections")
       .insert({
         user_id: user.id,
-        journal_entry_id: entry.id,
+        journal_entry_id:
+          entry.id,
         reflection_type: "dream",
-
-        prompt: interpretationPrompt,
-        response: storedResponse,
-
+        prompt:
+          interpretationPrompt,
+        response: JSON.stringify(
+          interpretation,
+          null,
+          2
+        ),
         summary:
           interpretation.summary,
         emotional_themes:

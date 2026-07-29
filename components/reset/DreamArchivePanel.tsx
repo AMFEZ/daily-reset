@@ -12,6 +12,8 @@ import { SignalEntryDisclosure } from "@/components/reset/SignalEntryDisclosure"
 import { completeActivityHabit } from "@/lib/completeActivityHabit";
 import { createClient } from "@/utils/supabase/client";
 
+type CaptureMode = "manual" | "voice";
+
 type DreamEntry = {
   id: string;
   entry_type: "dream";
@@ -20,6 +22,7 @@ type DreamEntry = {
   mood: string | null;
   energy: number | null;
   tags: string[] | null;
+  symbols: string[] | null;
   audio_path: string | null;
   raw_transcript: string | null;
   cleaned_transcript: string | null;
@@ -74,6 +77,11 @@ type InterpretationResponse = {
   error?: string;
 };
 
+type DreamMutationResponse = {
+  entry?: DreamEntry;
+  error?: string;
+};
+
 export function DreamArchivePanel({
   initialEntries,
   initialInterpretations,
@@ -81,40 +89,37 @@ export function DreamArchivePanel({
   const supabase = createClient();
   const [isPending, startTransition] =
     useTransition();
+
   const [entries, setEntries] =
-    useState<DreamEntry[]>(
-      initialEntries
+    useState<DreamEntry[]>(initialEntries);
+  const [interpretations, setInterpretations] =
+    useState<DreamInterpretation[]>(
+      initialInterpretations
     );
-  const [
-    interpretations,
-    setInterpretations,
-  ] = useState<DreamInterpretation[]>(
-    initialInterpretations
-  );
-  const [title, setTitle] =
-    useState("");
-  const [content, setContent] =
-    useState("");
-  const [symbols, setSymbols] =
-    useState("");
-  const [people, setPeople] =
-    useState("");
-  const [places, setPlaces] =
-    useState("");
+
+  const [captureMode, setCaptureMode] =
+    useState<CaptureMode>("manual");
+  const [activeEntryId, setActiveEntryId] =
+    useState<string | null>(null);
+  const [activeCreatedAt, setActiveCreatedAt] =
+    useState<string | null>(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] =
+    useState(false);
+
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+  const [symbols, setSymbols] = useState("");
+  const [people, setPeople] = useState("");
+  const [places, setPlaces] = useState("");
   const [audioPath, setAudioPath] =
     useState<string | null>(null);
-  const [
-    audioPreviewUrl,
-    setAudioPreviewUrl,
-  ] = useState<string | null>(null);
-  const [
-    rawTranscript,
-    setRawTranscript,
-  ] = useState("");
-  const [
-    cleanedTranscript,
-    setCleanedTranscript,
-  ] = useState("");
+  const [audioPreviewUrl, setAudioPreviewUrl] =
+    useState<string | null>(null);
+  const [rawTranscript, setRawTranscript] =
+    useState("");
+  const [cleanedTranscript, setCleanedTranscript] =
+    useState("");
+
   const [
     transcribingEntryId,
     setTranscribingEntryId,
@@ -123,62 +128,154 @@ export function DreamArchivePanel({
     interpretingEntryId,
     setInterpretingEntryId,
   ] = useState<string | null>(null);
+  const [deletingEntryId, setDeletingEntryId] =
+    useState<string | null>(null);
   const [message, setMessage] =
-    useState<string | null>(null);
-  const [lastSavedDreamId, setLastSavedDreamId] =
-    useState<string | null>(null);
-  const [lastSavedAudioPath, setLastSavedAudioPath] =
     useState<string | null>(null);
 
   const sortedEntries = useMemo(
     () =>
       [...entries].sort((a, b) =>
-        b.created_at.localeCompare(
-          a.created_at
-        )
+        b.created_at.localeCompare(a.created_at)
       ),
     [entries]
   );
 
-  const interpretationByEntry =
-    useMemo(
-      () =>
-        interpretations.reduce<
-          Record<
-            string,
-            DreamInterpretation
-          >
-        >((accumulator, item) => {
-          if (
-            !accumulator[
-              item.journal_entry_id
-            ]
-          ) {
-            accumulator[
-              item.journal_entry_id
-            ] = item;
-          }
-          return accumulator;
-        }, {}),
-      [interpretations]
+  const interpretationByEntry = useMemo(
+    () =>
+      interpretations.reduce<
+        Record<string, DreamInterpretation>
+      >((accumulator, item) => {
+        if (!accumulator[item.journal_entry_id]) {
+          accumulator[item.journal_entry_id] =
+            item;
+        }
+        return accumulator;
+      }, {}),
+    [interpretations]
+  );
+
+  const currentSourceText =
+    captureMode === "manual"
+      ? content.trim()
+      : (
+          cleanedTranscript.trim() ||
+          rawTranscript.trim()
+        );
+
+  const canInterpretCurrent = Boolean(
+    activeEntryId &&
+      !hasUnsavedChanges &&
+      currentSourceText.length >= 2
+  );
+
+  function markChanged() {
+    setHasUnsavedChanges(true);
+    setMessage(null);
+  }
+
+  function resetEditor() {
+    setCaptureMode("manual");
+    setActiveEntryId(null);
+    setActiveCreatedAt(null);
+    setHasUnsavedChanges(false);
+    setTitle("");
+    setContent("");
+    setSymbols("");
+    setPeople("");
+    setPlaces("");
+    setAudioPath(null);
+    setAudioPreviewUrl(null);
+    setRawTranscript("");
+    setCleanedTranscript("");
+    setMessage(null);
+  }
+
+  function switchCaptureMode(
+    nextMode: CaptureMode
+  ) {
+    if (nextMode === captureMode) return;
+
+    setCaptureMode(nextMode);
+    setHasUnsavedChanges(true);
+    setMessage(null);
+
+    if (nextMode === "manual") {
+      setAudioPath(null);
+      setAudioPreviewUrl(null);
+      setRawTranscript("");
+      setCleanedTranscript("");
+    } else {
+      setContent("");
+    }
+  }
+
+  function loadEntry(entry: DreamEntry) {
+    const nextMode: CaptureMode =
+      entry.audio_path ? "voice" : "manual";
+
+    setActiveEntryId(entry.id);
+    setActiveCreatedAt(entry.created_at);
+    setCaptureMode(nextMode);
+    setTitle(entry.title ?? "");
+    setContent(
+      nextMode === "manual"
+        ? entry.content
+        : ""
+    );
+    setSymbols(
+      (entry.symbols ?? []).join(", ")
+    );
+    setPeople("");
+    setPlaces("");
+    setAudioPath(entry.audio_path);
+    setAudioPreviewUrl(null);
+    setRawTranscript(
+      entry.raw_transcript ?? ""
+    );
+    setCleanedTranscript(
+      entry.cleaned_transcript ?? ""
+    );
+    setHasUnsavedChanges(false);
+    setMessage(
+      "Dream loaded into the editor."
     );
 
+    requestAnimationFrame(() => {
+      document
+        .getElementById("dream-editor")
+        ?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+    });
+  }
+
   function saveDream() {
-    const cleanContent =
-      content.trim();
-    const cleanRaw =
-      rawTranscript.trim();
+    const cleanTitle = title.trim();
+    const cleanContent = content.trim();
+    const cleanRaw = rawTranscript.trim();
     const cleanCleaned =
       cleanedTranscript.trim();
+    const parsedSymbols =
+      parseList(symbols);
 
     if (
-      cleanContent.length < 2 &&
-      cleanRaw.length < 2 &&
-      cleanCleaned.length < 2 &&
+      captureMode === "manual" &&
+      cleanContent.length < 2
+    ) {
+      setMessage(
+        "Write the dream details before saving."
+      );
+      return;
+    }
+
+    if (
+      captureMode === "voice" &&
       !audioPath
     ) {
       setMessage(
-        "Capture at least one dream signal."
+        "Record and upload the dream before saving."
       );
       return;
     }
@@ -186,28 +283,79 @@ export function DreamArchivePanel({
     setMessage(null);
 
     startTransition(async () => {
+      if (activeEntryId) {
+        try {
+          const updated = await updateDream(
+            activeEntryId,
+            {
+              title: cleanTitle,
+              content: cleanContent,
+              symbols: parsedSymbols,
+              captureMode,
+              audioPath,
+              rawTranscript: cleanRaw,
+              cleanedTranscript:
+                cleanCleaned,
+            }
+          );
+
+          setEntries((current) =>
+            current.map((entry) =>
+              entry.id === updated.id
+                ? updated
+                : entry
+            )
+          );
+          setInterpretations((current) =>
+            current.filter(
+              (item) =>
+                item.journal_entry_id !==
+                updated.id
+            )
+          );
+          setHasUnsavedChanges(false);
+          setMessage(
+            "Dream updated. Any older AI interpretation was cleared so it cannot become stale."
+          );
+        } catch (error) {
+          setMessage(
+            error instanceof Error
+              ? `Update failed: ${error.message}`
+              : "Dream update failed."
+          );
+        }
+        return;
+      }
+
       const { data: rawData, error } =
         await supabase
           .rpc("add_dream_entry", {
-            target_title:
-              title.trim(),
+            target_title: cleanTitle,
             target_content:
-              cleanContent,
+              captureMode === "manual"
+                ? cleanContent
+                : "",
             target_mood: "",
             target_emotion: "",
             target_symbols:
-              parseList(symbols),
+              parsedSymbols,
             target_people:
               parseList(people),
             target_places:
               parseList(places),
             target_tags: [],
             target_audio_path:
-              audioPath ?? "",
+              captureMode === "voice"
+                ? audioPath ?? ""
+                : "",
             target_raw_transcript:
-              cleanRaw,
+              captureMode === "voice"
+                ? cleanRaw
+                : "",
             target_cleaned_transcript:
-              cleanCleaned,
+              captureMode === "voice"
+                ? cleanCleaned
+                : "",
           })
           .single();
 
@@ -228,22 +376,32 @@ export function DreamArchivePanel({
       const data =
         rawData as unknown as SavedDreamEntryRow;
 
-      const persistedAudioPath =
-        data.log_audio_path || audioPath || null;
-
       const savedEntry: DreamEntry = {
         id: data.log_id,
         entry_type: "dream",
         title: data.log_title,
-        content: data.log_content,
-        mood: null,
+        content:
+          captureMode === "manual"
+            ? data.log_content
+            : "",
+        mood: data.log_mood,
         energy: data.log_energy,
-        tags: [],
-        audio_path: persistedAudioPath,
+        tags: data.log_tags ?? [],
+        symbols: parsedSymbols,
+        audio_path:
+          captureMode === "voice"
+            ? data.log_audio_path ||
+              audioPath ||
+              null
+            : null,
         raw_transcript:
-          data.log_raw_transcript,
+          captureMode === "voice"
+            ? data.log_raw_transcript
+            : null,
         cleaned_transcript:
-          data.log_cleaned_transcript,
+          captureMode === "voice"
+            ? data.log_cleaned_transcript
+            : null,
         created_at: data.log_created_at,
       };
 
@@ -251,20 +409,19 @@ export function DreamArchivePanel({
         savedEntry,
         ...current,
       ]);
-      setLastSavedDreamId(savedEntry.id);
-      setLastSavedAudioPath(
-        savedEntry.audio_path
+      setActiveEntryId(savedEntry.id);
+      setActiveCreatedAt(
+        savedEntry.created_at
       );
+      setAudioPath(savedEntry.audio_path);
+      setRawTranscript(
+        savedEntry.raw_transcript ?? ""
+      );
+      setCleanedTranscript(
+        savedEntry.cleaned_transcript ?? ""
+      );
+      setHasUnsavedChanges(false);
 
-      setTitle("");
-      setContent("");
-      setSymbols("");
-      setPeople("");
-      setPlaces("");
-      setAudioPath(null);
-      setAudioPreviewUrl(null);
-      setRawTranscript("");
-      setCleanedTranscript("");
       try {
         const matchedHabit =
           await completeActivityHabit({
@@ -273,7 +430,7 @@ export function DreamArchivePanel({
           });
 
         setMessage(
-          `Dream signal archived. ${matchedHabit.name} completed.`
+          `Dream saved. ${matchedHabit.name} completed. You can now transcribe or interpret it.`
         );
       } catch (syncError) {
         setMessage(
@@ -285,12 +442,51 @@ export function DreamArchivePanel({
     });
   }
 
+  async function updateDream(
+    entryId: string,
+    values: {
+      title: string;
+      content: string;
+      symbols: string[];
+      captureMode: CaptureMode;
+      audioPath: string | null;
+      rawTranscript: string;
+      cleanedTranscript: string;
+    }
+  ) {
+    const response = await fetch(
+      `/api/dreams/${entryId}`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify(values),
+      }
+    );
+
+    const result =
+      (await response.json()) as DreamMutationResponse;
+
+    if (
+      !response.ok ||
+      !result.entry
+    ) {
+      throw new Error(
+        result.error ??
+          "Dream update failed."
+      );
+    }
+
+    return result.entry;
+  }
+
   async function transcribeDream(
     entry: Pick<
       DreamEntry,
       "id" | "audio_path"
-    >,
-    syncTranscriptEditor = false
+    >
   ) {
     if (!entry.audio_path) {
       setMessage(
@@ -350,17 +546,26 @@ export function DreamArchivePanel({
         )
       );
 
-      if (syncTranscriptEditor) {
+      setInterpretations((current) =>
+        current.filter(
+          (item) =>
+            item.journal_entry_id !==
+            entry.id
+        )
+      );
+
+      if (activeEntryId === entry.id) {
         setRawTranscript(
           result.rawTranscript
         );
         setCleanedTranscript(
           result.cleanedTranscript
         );
+        setHasUnsavedChanges(false);
       }
 
       setMessage(
-        "Dream audio transcribed."
+        "Dream audio transcribed. The transcript is now editable."
       );
     } catch (error) {
       setMessage(
@@ -370,6 +575,61 @@ export function DreamArchivePanel({
       );
     } finally {
       setTranscribingEntryId(null);
+    }
+  }
+
+  async function clearTranscript() {
+    if (
+      !activeEntryId ||
+      captureMode !== "voice" ||
+      !audioPath
+    ) {
+      return;
+    }
+
+    setMessage(null);
+
+    try {
+      const updated = await updateDream(
+        activeEntryId,
+        {
+          title: title.trim(),
+          content: "",
+          symbols:
+            parseList(symbols),
+          captureMode: "voice",
+          audioPath,
+          rawTranscript: "",
+          cleanedTranscript: "",
+        }
+      );
+
+      setEntries((current) =>
+        current.map((entry) =>
+          entry.id === updated.id
+            ? updated
+            : entry
+        )
+      );
+      setInterpretations((current) =>
+        current.filter(
+          (item) =>
+            item.journal_entry_id !==
+            activeEntryId
+        )
+      );
+      setRawTranscript("");
+      setCleanedTranscript("");
+      setHasUnsavedChanges(false);
+      setMessage(
+        "Transcript deleted. The audio recording remains attached."
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Transcript deletion failed."
+      );
     }
   }
 
@@ -407,14 +667,18 @@ export function DreamArchivePanel({
         );
       }
 
-      setInterpretations((current) => [
-        result.interpretation as DreamInterpretation,
-        ...current.filter(
-          (item) =>
-            item.journal_entry_id !==
-            entry.id
-        ),
-      ]);
+      const interpretation =
+  result.interpretation;
+
+setInterpretations((current) => [
+  interpretation,
+  ...current.filter(
+    (item) =>
+      item.journal_entry_id !==
+      entry.id
+  ),
+]);
+
       setMessage(
         "Dream interpretation generated."
       );
@@ -429,204 +693,468 @@ export function DreamArchivePanel({
     }
   }
 
+  async function interpretCurrentDream() {
+    if (!activeEntryId) return;
+
+    const entry = entries.find(
+      (candidate) =>
+        candidate.id === activeEntryId
+    );
+
+    if (!entry) return;
+    await interpretDream(entry);
+  }
+
+  async function deleteDream(
+    entry: DreamEntry
+  ) {
+    const confirmed = window.confirm(
+      `Delete "${
+        entry.title || "Untitled Dream"
+      }" and its transcript/interpretation? This cannot be undone.`
+    );
+
+    if (!confirmed) return;
+
+    setDeletingEntryId(entry.id);
+    setMessage(null);
+
+    try {
+      const response = await fetch(
+        `/api/dreams/${entry.id}`,
+        {
+          method: "DELETE",
+        }
+      );
+
+      const result =
+        (await response.json()) as {
+          deletedId?: string;
+          error?: string;
+        };
+
+      if (
+        !response.ok ||
+        !result.deletedId
+      ) {
+        throw new Error(
+          result.error ??
+            "Dream deletion failed."
+        );
+      }
+
+      setEntries((current) =>
+        current.filter(
+          (candidate) =>
+            candidate.id !== entry.id
+        )
+      );
+      setInterpretations((current) =>
+        current.filter(
+          (item) =>
+            item.journal_entry_id !==
+            entry.id
+        )
+      );
+
+      if (activeEntryId === entry.id) {
+        resetEditor();
+      }
+
+      setMessage("Dream deleted.");
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Dream deletion failed."
+      );
+    } finally {
+      setDeletingEntryId(null);
+    }
+  }
+
+  const activeEntry = activeEntryId
+    ? entries.find(
+        (entry) =>
+          entry.id === activeEntryId
+      ) ?? null
+    : null;
+
   return (
-    <TerminalBlock title="dream.archive">
-
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <label className="block">
-          <FieldLabel>
-            Title
-          </FieldLabel>
-          <input
-            value={title}
-            onChange={(event) =>
-              setTitle(event.target.value)
-            }
-            className={inputClassName}
-          />
-        </label>
-
-        <label className="block">
-          <FieldLabel>Symbols</FieldLabel>
-          <input
-            value={symbols}
-            onChange={(event) =>
-              setSymbols(event.target.value)
-            }
-            className={inputClassName}
-          />
-        </label>
-      </div>
-
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <label className="block">
-          <FieldLabel>People</FieldLabel>
-          <input
-            value={people}
-            onChange={(event) =>
-              setPeople(event.target.value)
-            }
-            className={inputClassName}
-          />
-        </label>
-
-        <label className="block">
-          <FieldLabel>Places</FieldLabel>
-          <input
-            value={places}
-            onChange={(event) =>
-              setPlaces(event.target.value)
-            }
-            className={inputClassName}
-          />
-        </label>
-      </div>
-
-      <label className="mt-3 block">
-        <FieldLabel>Dream details</FieldLabel>
-        <textarea
-          value={content}
-          onChange={(event) =>
-            setContent(event.target.value)
-          }
-          className={`${inputClassName} min-h-[220px] resize-y leading-6`}
-        />
-      </label>
-
-      <div className="mt-4 space-y-3">
-        <SignalDisclosure
-          title="dream.audio.recorder"
-          summary="Record and attach a spoken dream"
-        >
-          <ContextAudioRecorder
-            onAudioUploaded={(
-              path,
-              previewUrl
-            ) => {
-              setAudioPath(path);
-              setAudioPreviewUrl(
-                previewUrl
-              );
-              setLastSavedDreamId(null);
-              setLastSavedAudioPath(null);
-            }}
-            savedDreamId={
-              lastSavedDreamId
-            }
-            savedAudioPath={
-              lastSavedAudioPath
-            }
-            isTranscribing={
-              Boolean(lastSavedDreamId) &&
-              transcribingEntryId ===
-                lastSavedDreamId
-            }
-            onTranscribe={async () => {
-              if (
-                !lastSavedDreamId ||
-                !lastSavedAudioPath
-              ) {
-                setMessage(
-                  "Save the recorded dream before transcribing it."
-                );
-                return;
-              }
-
-              await transcribeDream(
-                {
-                  id: lastSavedDreamId,
-                  audio_path:
-                    lastSavedAudioPath,
-                },
-                true
-              );
-            }}
-          />
-
-          {audioPath ? (
-            <div className="mt-3 border border-[#242424] bg-[#030303] p-3">
-              <p className="terminal-green text-xs">
-                &gt; Dream recording attached.
+    <TerminalBlock>
+      <div
+        id="dream-editor"
+        className="scroll-mt-20"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#1f4b32] bg-[#06110a] px-3 py-3">
+          <div>
+            <p className="terminal-green text-sm font-semibold tracking-[0.08em]">
+              &gt;{" "}
+              {activeEntryId
+                ? "Edit Dream"
+                : "New Dream"}
+            </p>
+            {activeCreatedAt ? (
+              <p className="terminal-muted mt-1 text-[10px]">
+                saved{" "}
+                {new Date(
+                  activeCreatedAt
+                ).toLocaleString()}
               </p>
-              <p className="terminal-muted mt-1 break-all text-[10px]">
-                {audioPath}
-              </p>
-              {audioPreviewUrl ? (
-                <audio
-                  controls
-                  src={audioPreviewUrl}
-                  className="mt-3 w-full"
-                />
-              ) : null}
-            </div>
+            ) : null}
+          </div>
+
+          {activeEntryId ? (
+            <button
+              type="button"
+              onClick={resetEditor}
+              className="min-h-[38px] border border-[#365341] px-3 text-xs text-[#9fd8b5] transition hover:border-[#39ff88] hover:text-[#39ff88]"
+            >
+              new dream
+            </button>
           ) : null}
-        </SignalDisclosure>
+        </div>
 
-        <SignalDisclosure
-          title="dream.transcript"
-          summary="Raw and cleaned dream transcript"
-        >
-          <div className="space-y-3">
+        <div className="p-3">
+          <FieldLabel>
+            Capture method
+          </FieldLabel>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <ModeButton
+              active={
+                captureMode === "manual"
+              }
+              label="Manual"
+              onClick={() =>
+                switchCaptureMode(
+                  "manual"
+                )
+              }
+            />
+            <ModeButton
+              active={
+                captureMode === "voice"
+              }
+              label="Voice"
+              onClick={() =>
+                switchCaptureMode(
+                  "voice"
+                )
+              }
+            />
+          </div>
+
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
             <label className="block">
               <FieldLabel>
-                Raw transcript
+                Title
               </FieldLabel>
-              <textarea
-                value={rawTranscript}
-                onChange={(event) =>
-                  setRawTranscript(
+              <input
+                value={title}
+                onChange={(event) => {
+                  setTitle(
                     event.target.value
-                  )
-                }
-                className={`${inputClassName} min-h-[110px] resize-y leading-6`}
+                  );
+                  markChanged();
+                }}
+                className={inputClassName}
               />
             </label>
+
             <label className="block">
               <FieldLabel>
-                Cleaned transcript
+                Symbols
               </FieldLabel>
-              <textarea
-                value={cleanedTranscript}
-                onChange={(event) =>
-                  setCleanedTranscript(
+              <input
+                value={symbols}
+                onChange={(event) => {
+                  setSymbols(
                     event.target.value
-                  )
-                }
-                className={`${inputClassName} min-h-[110px] resize-y leading-6`}
+                  );
+                  markChanged();
+                }}
+                className={inputClassName}
               />
             </label>
           </div>
-        </SignalDisclosure>
+
+          {!activeEntryId ? (
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <label className="block">
+                <FieldLabel>
+                  People
+                </FieldLabel>
+                <input
+                  value={people}
+                  onChange={(event) => {
+                    setPeople(
+                      event.target.value
+                    );
+                    markChanged();
+                  }}
+                  className={
+                    inputClassName
+                  }
+                />
+              </label>
+
+              <label className="block">
+                <FieldLabel>
+                  Places
+                </FieldLabel>
+                <input
+                  value={places}
+                  onChange={(event) => {
+                    setPlaces(
+                      event.target.value
+                    );
+                    markChanged();
+                  }}
+                  className={
+                    inputClassName
+                  }
+                />
+              </label>
+            </div>
+          ) : null}
+
+          <div className="mt-4">
+            <FieldLabel>
+              Dream details
+            </FieldLabel>
+
+            {captureMode ===
+            "manual" ? (
+              <textarea
+                value={content}
+                onChange={(event) => {
+                  setContent(
+                    event.target.value
+                  );
+                  markChanged();
+                }}
+                className={`${inputClassName} min-h-[220px] resize-y leading-6`}
+              />
+            ) : (
+              <div className="mt-2 border border-[#242424] bg-[#030303] p-3">
+                <ContextAudioRecorder
+                  onAudioUploaded={(
+                    path,
+                    previewUrl
+                  ) => {
+                    setAudioPath(path);
+                    setAudioPreviewUrl(
+                      previewUrl
+                    );
+                    setRawTranscript("");
+                    setCleanedTranscript("");
+                    setHasUnsavedChanges(
+                      true
+                    );
+                    setMessage(
+                      "Audio uploaded. Save the dream before transcription."
+                    );
+                  }}
+                  savedDreamId={
+                    hasUnsavedChanges
+                      ? null
+                      : activeEntryId
+                  }
+                  savedAudioPath={
+                    hasUnsavedChanges
+                      ? null
+                      : audioPath
+                  }
+                  isTranscribing={
+                    Boolean(
+                      activeEntryId
+                    ) &&
+                    transcribingEntryId ===
+                      activeEntryId
+                  }
+                  onTranscribe={async () => {
+                    if (
+                      !activeEntryId ||
+                      !audioPath ||
+                      hasUnsavedChanges
+                    ) {
+                      setMessage(
+                        "Save the voice dream before transcribing it."
+                      );
+                      return;
+                    }
+
+                    await transcribeDream({
+                      id: activeEntryId,
+                      audio_path:
+                        audioPath,
+                    });
+                  }}
+                />
+
+                {audioPath ? (
+                  <div className="mt-3 border-t border-[#242424] pt-3">
+                    <p className="terminal-green text-xs">
+                      &gt; recording attached
+                    </p>
+                    <p className="terminal-muted mt-1 break-all text-[10px]">
+                      {audioPath}
+                    </p>
+                    {audioPreviewUrl ? (
+                      <audio
+                        controls
+                        src={
+                          audioPreviewUrl
+                        }
+                        className="mt-3 w-full"
+                      />
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {rawTranscript ||
+                cleanedTranscript ? (
+                  <div className="mt-4 space-y-3 border-t border-[#242424] pt-4">
+                    <label className="block">
+                      <FieldLabel>
+                        Raw transcript
+                      </FieldLabel>
+                      <textarea
+                        value={
+                          rawTranscript
+                        }
+                        onChange={(
+                          event
+                        ) => {
+                          setRawTranscript(
+                            event.target
+                              .value
+                          );
+                          markChanged();
+                        }}
+                        className={`${inputClassName} min-h-[110px] resize-y leading-6`}
+                      />
+                    </label>
+
+                    <label className="block">
+                      <FieldLabel>
+                        Cleaned transcript
+                      </FieldLabel>
+                      <textarea
+                        value={
+                          cleanedTranscript
+                        }
+                        onChange={(
+                          event
+                        ) => {
+                          setCleanedTranscript(
+                            event.target
+                              .value
+                          );
+                          markChanged();
+                        }}
+                        className={`${inputClassName} min-h-[110px] resize-y leading-6`}
+                      />
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void clearTranscript()
+                      }
+                      disabled={isPending}
+                      className="min-h-[42px] w-full border border-[#6b3030] px-3 py-2 text-left text-xs text-[#ff7b7b] transition hover:border-[#ff4d4d] disabled:opacity-50"
+                    >
+                      &gt; delete transcript
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() =>
+                void interpretCurrentDream()
+              }
+              disabled={
+                !canInterpretCurrent ||
+                interpretingEntryId ===
+                  activeEntryId
+              }
+              className="mt-3 min-h-[48px] w-full border border-[#39ff88] bg-[#041008] px-3 py-3 text-left text-sm text-[#39ff88] transition hover:bg-[#07150b] disabled:cursor-not-allowed disabled:border-[#242424] disabled:bg-black disabled:text-[#666666]"
+            >
+              &gt;{" "}
+              {interpretingEntryId ===
+              activeEntryId
+                ? "interpreting dream..."
+                : !activeEntryId
+                  ? "save first, then interpret"
+                  : hasUnsavedChanges
+                    ? "save changes before interpretation"
+                    : interpretationByEntry[
+                          activeEntryId
+                        ]
+                      ? "re-interpret dream"
+                      : "interpret dream"}
+            </button>
+
+            {activeEntry &&
+            interpretationByEntry[
+              activeEntry.id
+            ] ? (
+              <DreamInterpretationView
+                interpretation={
+                  interpretationByEntry[
+                    activeEntry.id
+                  ]
+                }
+              />
+            ) : null}
+          </div>
+
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={saveDream}
+              disabled={isPending}
+              className="min-h-[50px] w-full border border-[#39ff88] bg-[#000000] px-4 py-3 text-left text-sm text-[#39ff88] disabled:opacity-60"
+            >
+              &gt;{" "}
+              {isPending
+                ? "saving dream..."
+                : activeEntryId
+                  ? "save dream changes"
+                  : "save dream"}
+            </button>
+
+            <button
+              type="button"
+              onClick={resetEditor}
+              disabled={isPending}
+              className="min-h-[50px] w-full border border-[#365341] bg-[#000000] px-4 py-3 text-left text-sm text-[#9fd8b5] disabled:opacity-60"
+            >
+              &gt; clear editor
+            </button>
+          </div>
+
+          {message ? (
+            <p className="mt-3 text-xs leading-6 text-[#ffb020]">
+              &gt; {message}
+            </p>
+          ) : null}
+        </div>
       </div>
 
-      <button
-        type="button"
-        onClick={saveDream}
-        disabled={isPending}
-        className="mt-4 min-h-[50px] w-full border border-[#39ff88] bg-[#000000] px-4 py-3 text-left text-sm text-[#39ff88] disabled:opacity-60"
-      >
-        &gt;{" "}
-        {isPending
-          ? "saving dream..."
-          : "save dream_signal"}
-      </button>
-
-      {message ? (
-        <p className="mt-3 text-xs text-[#ffb020]">
-          &gt; {message}
-        </p>
-      ) : null}
-
-      <div className="mt-5">
+      <div className="mt-4">
         <SignalDisclosure
-          title="recent.dream.signals"
+          title="Recent Dream Signals"
           count={sortedEntries.length}
-          summary="Dream history, transcripts, and interpretations"
         >
           <div className="min-w-0 max-w-full overflow-hidden border border-[#242424] sm:max-h-[680px] sm:overflow-y-auto">
             {sortedEntries.length > 0 ? (
               sortedEntries.map(
-                (entry, index) => {
+                (entry) => {
                   const created = new Date(
                     entry.created_at
                   );
@@ -634,11 +1162,15 @@ export function DreamArchivePanel({
                     interpretationByEntry[
                       entry.id
                     ];
-                  const preview =
-                    entry.content ||
-                    entry.cleaned_transcript ||
-                    entry.raw_transcript ||
-                    "Audio-only dream signal.";
+                  const isVoice =
+                    Boolean(
+                      entry.audio_path
+                    );
+                  const sourceText = isVoice
+                    ? entry.cleaned_transcript ||
+                      entry.raw_transcript ||
+                      ""
+                    : entry.content;
                   const timestamp = `${created.toLocaleDateString()} ${created.toLocaleTimeString(
                     [],
                     {
@@ -649,68 +1181,128 @@ export function DreamArchivePanel({
 
                   return (
                     <SignalEntryDisclosure
-                      key={`${entry.id}-${entry.created_at}-${index}`}
+                      key={entry.id}
                       title={
                         entry.title ||
                         "Untitled Dream"
                       }
                       meta={timestamp}
                     >
-                      <p className="max-w-full whitespace-pre-wrap break-words leading-6 [overflow-wrap:anywhere]">
-                        {preview}
-                      </p>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="border border-[#365341] bg-[#06110a] px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-[#9fd8b5]">
+                          {isVoice
+                            ? "voice"
+                            : "manual"}
+                        </span>
 
-                      {entry.audio_path ? (
-                        <div className="mt-3 border border-[#242424] bg-[#030303] p-3">
-                          <p className="terminal-green break-all">
-                            audio: {entry.audio_path}
-                          </p>
+                        <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
                             onClick={() =>
-                              transcribeDream(entry)
+                              loadEntry(
+                                entry
+                              )
+                            }
+                            className="min-h-[38px] border border-[#365341] px-3 text-xs text-[#9fd8b5] transition hover:border-[#39ff88] hover:text-[#39ff88]"
+                          >
+                            edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void deleteDream(
+                                entry
+                              )
+                            }
+                            disabled={
+                              deletingEntryId ===
+                              entry.id
+                            }
+                            className="min-h-[38px] border border-[#6b3030] px-3 text-xs text-[#ff7b7b] transition hover:border-[#ff4d4d] disabled:opacity-50"
+                          >
+                            {deletingEntryId ===
+                            entry.id
+                              ? "deleting..."
+                              : "delete"}
+                          </button>
+                        </div>
+                      </div>
+
+                      {!isVoice &&
+                      sourceText ? (
+                        <p className="mt-3 max-w-full whitespace-pre-wrap break-words leading-6 [overflow-wrap:anywhere]">
+                          {sourceText}
+                        </p>
+                      ) : null}
+
+                      {isVoice ? (
+                        <div className="mt-3 border border-[#242424] bg-[#030303] p-3">
+                          <p className="terminal-green text-xs">
+                            &gt; audio recording
+                          </p>
+                          <p className="terminal-muted mt-1 break-all text-[10px]">
+                            {
+                              entry.audio_path
+                            }
+                          </p>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void transcribeDream(
+                                entry
+                              )
                             }
                             disabled={
                               transcribingEntryId ===
                               entry.id
                             }
-                            className="mt-3 min-h-[46px] w-full border border-[#39ff88] px-3 py-2 text-left text-[#39ff88] disabled:opacity-50"
+                            className="mt-3 min-h-[44px] w-full border border-[#39ff88] px-3 py-2 text-left text-xs text-[#39ff88] disabled:opacity-50"
                           >
                             &gt;{" "}
                             {transcribingEntryId ===
                             entry.id
-                              ? "transcribing_dream..."
-                              : "speech_to_text"}
+                              ? "transcribing..."
+                              : entry.raw_transcript ||
+                                  entry.cleaned_transcript
+                                ? "re-transcribe audio"
+                                : "speech to text"}
                           </button>
+
+                          <TranscriptView
+                            raw={
+                              entry.raw_transcript
+                            }
+                            cleaned={
+                              entry.cleaned_transcript
+                            }
+                          />
                         </div>
                       ) : null}
 
                       <button
                         type="button"
                         onClick={() =>
-                          interpretDream(entry)
+                          void interpretDream(
+                            entry
+                          )
                         }
                         disabled={
                           interpretingEntryId ===
-                          entry.id
+                            entry.id ||
+                          sourceText.trim()
+                            .length < 2
                         }
-                        className="mt-3 min-h-[46px] w-full border border-[#39ff88] px-3 py-2 text-left text-[#39ff88] disabled:opacity-50"
+                        className="mt-3 min-h-[44px] w-full border border-[#39ff88] bg-[#041008] px-3 py-2 text-left text-xs text-[#39ff88] disabled:border-[#242424] disabled:bg-black disabled:text-[#666666]"
                       >
                         &gt;{" "}
                         {interpretingEntryId ===
                         entry.id
-                          ? "interpreting_dream..."
+                          ? "interpreting..."
                           : interpretation
-                            ? "re-interpret_dream"
-                            : "interpret_dream"}
+                            ? "re-interpret dream"
+                            : "interpret dream"}
                       </button>
-
-                      <TranscriptView
-                        raw={entry.raw_transcript}
-                        cleaned={
-                          entry.cleaned_transcript
-                        }
-                      />
 
                       {interpretation ? (
                         <DreamInterpretationView
@@ -735,6 +1327,31 @@ export function DreamArchivePanel({
   );
 }
 
+function ModeButton({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={
+        active
+          ? "min-h-[44px] border border-[#39ff88] bg-[#06110a] px-3 text-left text-sm text-[#39ff88]"
+          : "min-h-[44px] border border-[#242424] bg-black px-3 text-left text-sm text-[#8a8a8a] transition hover:border-[#365341] hover:text-[#9fd8b5]"
+      }
+    >
+      &gt; {label}
+    </button>
+  );
+}
+
 function parseList(value: string) {
   return value
     .split(",")
@@ -752,23 +1369,24 @@ function TranscriptView({
   if (!raw && !cleaned) return null;
 
   return (
-    <div className="mt-3 border border-[#242424] bg-[#030303] p-3">
+    <div className="mt-3 border-t border-[#242424] pt-3">
       {raw ? (
         <div>
-          <p className="terminal-green">
+          <p className="terminal-green text-xs">
             raw transcript:
           </p>
-          <p className="terminal-muted mt-1 whitespace-pre-wrap leading-6">
+          <p className="terminal-muted mt-1 whitespace-pre-wrap break-words text-xs leading-6 [overflow-wrap:anywhere]">
             {raw}
           </p>
         </div>
       ) : null}
+
       {cleaned ? (
         <div className={raw ? "mt-3" : ""}>
-          <p className="terminal-green">
+          <p className="terminal-green text-xs">
             cleaned transcript:
           </p>
-          <p className="terminal-muted mt-1 whitespace-pre-wrap leading-6">
+          <p className="terminal-muted mt-1 whitespace-pre-wrap break-words text-xs leading-6 [overflow-wrap:anywhere]">
             {cleaned}
           </p>
         </div>
@@ -785,7 +1403,7 @@ function DreamInterpretationView({
   return (
     <div className="mt-3 border border-[#39ff88] bg-[#000000] p-3 text-xs leading-6">
       <p className="terminal-green mb-3 uppercase tracking-[0.18em]">
-        &gt; dream.interpretation
+        &gt; dream interpretation
       </p>
       <DreamSection
         title="SUMMARY"
@@ -900,11 +1518,11 @@ function FieldLabel({
 function TerminalBlock({
   children,
 }: {
-  title: string;
   children: React.ReactNode;
 }) {
   return <div className="p-3">{children}</div>;
 }
+
 function getLocalDateKey() {
   const date = new Date();
   const year = date.getFullYear();
