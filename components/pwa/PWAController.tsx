@@ -17,6 +17,14 @@ type BeforeInstallPromptEvent =
     }>;
   };
 
+type DailyResetServiceWorkerMessage = {
+  type:
+    | "CACHE_APP_SHELL"
+    | "CLEAR_PRIVATE_SHELL";
+  url?: string;
+  assets?: string[];
+};
+
 const DISMISS_KEY =
   "daily-reset-pwa-install-dismissed-v1";
 
@@ -72,6 +80,58 @@ export function PWAController() {
       ) === "true"
     );
 
+    let disposed = false;
+    let registration:
+      | ServiceWorkerRegistration
+      | null = null;
+
+    function warmCurrentShell() {
+      if (
+        disposed ||
+        !registration ||
+        !navigator.onLine
+      ) {
+        return;
+      }
+
+      const worker =
+        registration.active ??
+        registration.waiting ??
+        registration.installing;
+
+      if (!worker) {
+        return;
+      }
+
+      const message: DailyResetServiceWorkerMessage =
+        {
+          type:
+            "CACHE_APP_SHELL",
+          url:
+            `${window.location.origin}/`,
+          assets:
+            collectShellAssets(),
+        };
+
+      worker.postMessage(
+        message
+      );
+    }
+
+    function handleControllerChange() {
+      window.setTimeout(
+        warmCurrentShell,
+        250
+      );
+    }
+
+    function handleOnline() {
+      window.setTimeout(
+        warmCurrentShell,
+        500
+      );
+    }
+
     if (
       "serviceWorker" in
         navigator &&
@@ -87,8 +147,29 @@ export function PWAController() {
           }
         )
         .then(
-          (registration) =>
-            registration.update()
+          async (
+            registered
+          ) => {
+            registration =
+              registered;
+
+            await registered.update();
+
+            const ready =
+              await navigator.serviceWorker.ready;
+
+            if (disposed) {
+              return;
+            }
+
+            registration =
+              ready;
+
+            window.setTimeout(
+              warmCurrentShell,
+              500
+            );
+          }
         )
         .catch((error) => {
           console.error(
@@ -96,6 +177,15 @@ export function PWAController() {
             error
           );
         });
+
+      navigator.serviceWorker.addEventListener(
+        "controllerchange",
+        handleControllerChange
+      );
+      window.addEventListener(
+        "online",
+        handleOnline
+      );
     }
 
     function handleInstallPrompt(
@@ -103,8 +193,7 @@ export function PWAController() {
     ) {
       event.preventDefault();
       setInstallPrompt(
-        event as
-          BeforeInstallPromptEvent
+        event as BeforeInstallPromptEvent
       );
       setIsDismissed(false);
     }
@@ -112,6 +201,10 @@ export function PWAController() {
     function handleInstalled() {
       setInstallPrompt(null);
       setIsStandalone(true);
+      window.setTimeout(
+        warmCurrentShell,
+        500
+      );
     }
 
     window.addEventListener(
@@ -124,6 +217,8 @@ export function PWAController() {
     );
 
     return () => {
+      disposed = true;
+
       window.removeEventListener(
         "beforeinstallprompt",
         handleInstallPrompt
@@ -132,6 +227,20 @@ export function PWAController() {
         "appinstalled",
         handleInstalled
       );
+      window.removeEventListener(
+        "online",
+        handleOnline
+      );
+
+      if (
+        "serviceWorker" in
+        navigator
+      ) {
+        navigator.serviceWorker.removeEventListener(
+          "controllerchange",
+          handleControllerChange
+        );
+      }
     };
   }, []);
 
@@ -160,7 +269,9 @@ export function PWAController() {
         choice.outcome ===
         "accepted"
       ) {
-        setInstallPrompt(null);
+        setInstallPrompt(
+          null
+        );
       }
     } finally {
       setIsInstalling(false);
@@ -231,5 +342,44 @@ export function PWAController() {
         </button>
       ) : null}
     </aside>
+  );
+}
+
+function collectShellAssets() {
+  const assets =
+    new Set<string>();
+
+  for (
+    const script of
+    Array.from(
+      document.scripts
+    )
+  ) {
+    if (script.src) {
+      assets.add(
+        script.src
+      );
+    }
+  }
+
+  for (
+    const link of
+    Array.from(
+      document.querySelectorAll<
+        HTMLLinkElement
+      >(
+        'link[rel="stylesheet"], link[rel="modulepreload"], link[rel="preload"], link[rel="manifest"], link[rel="icon"], link[rel="apple-touch-icon"]'
+      )
+    )
+  ) {
+    if (link.href) {
+      assets.add(
+        link.href
+      );
+    }
+  }
+
+  return Array.from(
+    assets
   );
 }

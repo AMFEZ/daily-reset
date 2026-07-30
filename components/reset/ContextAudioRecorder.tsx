@@ -1,16 +1,24 @@
 "use client";
 
-import { DreamAudioRecorder } from "@/components/reset/DreamAudioRecorder";
+import {
+  DreamAudioRecorder,
+  type AudioCaptureState,
+} from "@/components/reset/DreamAudioRecorder";
+
+export type CapturedAudioState =
+  AudioCaptureState;
 
 type ContextAudioRecorderProps = {
   onAudioUploaded: (
     path: string,
-    previewUrl: string
+    previewUrl: string,
+    captureState?: CapturedAudioState
   ) => void;
   savedDreamId?: string | null;
   savedAudioPath?: string | null;
   isTranscribing?: boolean;
   onTranscribe?: () => void | Promise<void>;
+  contextLabel?: "dream" | "shadow";
 };
 
 export function ContextAudioRecorder({
@@ -19,6 +27,7 @@ export function ContextAudioRecorder({
   savedAudioPath = null,
   isTranscribing = false,
   onTranscribe,
+  contextLabel = "dream",
 }: ContextAudioRecorderProps) {
   return (
     <div
@@ -35,11 +44,24 @@ export function ContextAudioRecorder({
       ].join(" ")}
     >
       <DreamAudioRecorder
-        onAudioUploaded={onAudioUploaded}
-        savedDreamId={savedDreamId}
-        savedAudioPath={savedAudioPath}
-        isTranscribing={isTranscribing}
-        onTranscribe={onTranscribe}
+        onAudioUploaded={
+          onAudioUploaded
+        }
+        savedDreamId={
+          savedDreamId
+        }
+        savedAudioPath={
+          savedAudioPath
+        }
+        isTranscribing={
+          isTranscribing
+        }
+        onTranscribe={
+          onTranscribe
+        }
+        contextLabel={
+          contextLabel
+        }
       />
     </div>
   );

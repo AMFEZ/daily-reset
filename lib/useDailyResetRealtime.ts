@@ -45,6 +45,9 @@ type DailyResetRealtimeOptions = {
   onProteinChange: () => void;
 };
 
+const CONNECTION_TIMEOUT_MS =
+  8_000;
+
 export function useDailyResetRealtime({
   supabase,
   date,
@@ -60,29 +63,129 @@ export function useDailyResetRealtime({
 
   useEffect(() => {
     let active = true;
+    let attempt = 0;
     let channel:
       | RealtimeChannel
       | null = null;
+    let connectionTimer:
+      | number
+      | null = null;
+
+    function clearConnectionTimer() {
+      if (
+        connectionTimer !==
+        null
+      ) {
+        window.clearTimeout(
+          connectionTimer
+        );
+        connectionTimer = null;
+      }
+    }
+
+    async function removeCurrentChannel() {
+      const current =
+        channel;
+      channel = null;
+
+      if (current) {
+        try {
+          await supabase.removeChannel(
+            current
+          );
+        } catch (error) {
+          console.error(
+            "Realtime channel cleanup failed:",
+            error
+          );
+        }
+      }
+    }
 
     async function subscribe() {
-      setStatus("connecting");
+      const currentAttempt =
+        ++attempt;
 
-      const {
-        data: { session },
-        error,
-      } = await supabase.auth.getSession();
+      clearConnectionTimer();
 
-      const user = session?.user ?? null;
+      if (!navigator.onLine) {
+        await removeCurrentChannel();
 
-      if (!active) {
+        if (
+          active &&
+          currentAttempt ===
+            attempt
+        ) {
+          setStatus(
+            "degraded"
+          );
+        }
+
         return;
       }
 
-      if (error || !user) {
+      setStatus("connecting");
+
+      await removeCurrentChannel();
+
+      if (
+        !active ||
+        currentAttempt !==
+          attempt
+      ) {
+        return;
+      }
+
+      let session:
+        | Awaited<
+            ReturnType<
+              typeof supabase.auth.getSession
+            >
+          >["data"]["session"]
+        | null = null;
+
+      try {
+        const result =
+          await supabase.auth.getSession();
+
+        if (result.error) {
+          throw result.error;
+        }
+
+        session =
+          result.data.session;
+      } catch (error) {
+        if (
+          active &&
+          currentAttempt ===
+            attempt
+        ) {
+          console.error(
+            "Realtime authentication failed:",
+            error
+          );
+          setStatus(
+            "degraded"
+          );
+        }
+
+        return;
+      }
+
+      if (
+        !active ||
+        currentAttempt !==
+          attempt
+      ) {
+        return;
+      }
+
+      const user =
+        session?.user ?? null;
+
+      if (!user) {
         console.error(
-          "Realtime authentication failed:",
-          error?.message ??
-            "No authenticated user."
+          "Realtime authentication failed: No authenticated user."
         );
         setStatus("degraded");
         return;
@@ -90,6 +193,22 @@ export function useDailyResetRealtime({
 
       const userFilter =
         `user_id=eq.${user.id}`;
+
+      connectionTimer =
+        window.setTimeout(
+          () => {
+            if (
+              active &&
+              currentAttempt ===
+                attempt
+            ) {
+              setStatus(
+                "degraded"
+              );
+            }
+          },
+          CONNECTION_TIMEOUT_MS
+        );
 
       channel = supabase
         .channel(
@@ -100,8 +219,10 @@ export function useDailyResetRealtime({
           {
             event: "INSERT",
             schema: "public",
-            table: "habit_logs",
-            filter: userFilter,
+            table:
+              "habit_logs",
+            filter:
+              userFilter,
           },
           (
             payload:
@@ -117,8 +238,10 @@ export function useDailyResetRealtime({
           {
             event: "UPDATE",
             schema: "public",
-            table: "habit_logs",
-            filter: userFilter,
+            table:
+              "habit_logs",
+            filter:
+              userFilter,
           },
           (
             payload:
@@ -134,7 +257,8 @@ export function useDailyResetRealtime({
           {
             event: "DELETE",
             schema: "public",
-            table: "habit_logs",
+            table:
+              "habit_logs",
           },
           () => {
             onHabitDelete();
@@ -145,8 +269,10 @@ export function useDailyResetRealtime({
           {
             event: "INSERT",
             schema: "public",
-            table: "weight_logs",
-            filter: userFilter,
+            table:
+              "weight_logs",
+            filter:
+              userFilter,
           },
           onWeightChange
         )
@@ -155,8 +281,10 @@ export function useDailyResetRealtime({
           {
             event: "UPDATE",
             schema: "public",
-            table: "weight_logs",
-            filter: userFilter,
+            table:
+              "weight_logs",
+            filter:
+              userFilter,
           },
           onWeightChange
         )
@@ -165,7 +293,8 @@ export function useDailyResetRealtime({
           {
             event: "DELETE",
             schema: "public",
-            table: "weight_logs",
+            table:
+              "weight_logs",
           },
           onWeightChange
         )
@@ -174,8 +303,10 @@ export function useDailyResetRealtime({
           {
             event: "INSERT",
             schema: "public",
-            table: "protein_logs",
-            filter: userFilter,
+            table:
+              "protein_logs",
+            filter:
+              userFilter,
           },
           onProteinChange
         )
@@ -184,8 +315,10 @@ export function useDailyResetRealtime({
           {
             event: "UPDATE",
             schema: "public",
-            table: "protein_logs",
-            filter: userFilter,
+            table:
+              "protein_logs",
+            filter:
+              userFilter,
           },
           onProteinChange
         )
@@ -194,47 +327,105 @@ export function useDailyResetRealtime({
           {
             event: "DELETE",
             schema: "public",
-            table: "protein_logs",
+            table:
+              "protein_logs",
           },
           onProteinChange
         )
-        .subscribe((
-          nextStatus:
-            RealtimeSubscribeStatus
-        ) => {
-          if (!active) {
-            return;
-          }
+        .subscribe(
+          (
+            nextStatus:
+              RealtimeSubscribeStatus
+          ) => {
+            if (
+              !active ||
+              currentAttempt !==
+                attempt
+            ) {
+              return;
+            }
 
-          if (
-            nextStatus ===
-            "SUBSCRIBED"
-          ) {
-            setStatus("live");
-            return;
-          }
+            if (
+              nextStatus ===
+              "SUBSCRIBED"
+            ) {
+              clearConnectionTimer();
+              setStatus("live");
+              return;
+            }
 
-          if (
-            nextStatus ===
-              "CHANNEL_ERROR" ||
-            nextStatus === "TIMED_OUT" ||
-            nextStatus === "CLOSED"
-          ) {
-            setStatus("degraded");
+            if (
+              nextStatus ===
+                "CHANNEL_ERROR" ||
+              nextStatus ===
+                "TIMED_OUT" ||
+              nextStatus ===
+                "CLOSED"
+            ) {
+              clearConnectionTimer();
+              setStatus(
+                "degraded"
+              );
+            }
           }
-        });
+        );
     }
+
+    function handleOffline() {
+      attempt += 1;
+      clearConnectionTimer();
+      setStatus("degraded");
+      void removeCurrentChannel();
+    }
+
+    function handleOnline() {
+      void subscribe();
+    }
+
+    function handleVisibilityChange() {
+      if (
+        document.visibilityState ===
+          "visible" &&
+        navigator.onLine
+      ) {
+        void subscribe();
+      }
+    }
+
+    window.addEventListener(
+      "offline",
+      handleOffline
+    );
+    window.addEventListener(
+      "online",
+      handleOnline
+    );
+    document.addEventListener(
+      "visibilitychange",
+      handleVisibilityChange
+    );
 
     void subscribe();
 
     return () => {
       active = false;
+      attempt += 1;
+      clearConnectionTimer();
 
-      if (channel) {
-        void supabase.removeChannel(
-          channel
-        );
-      }
+      window.removeEventListener(
+        "offline",
+        handleOffline
+      );
+      window.removeEventListener(
+        "online",
+        handleOnline
+      );
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibilityChange
+      );
+
+      void removeCurrentChannel();
     };
   }, [
     date,

@@ -1,14 +1,27 @@
 "use client";
 
 import {
+  useEffect,
   useMemo,
   useState,
   useTransition,
 } from "react";
 import { SignalDisclosure } from "@/components/reset/SignalDisclosure";
 import { SignalEntryDisclosure } from "@/components/reset/SignalEntryDisclosure";
+import {
+  OFFLINE_QUEUE_EVENT,
+  createOfflineEntityId,
+  enqueueOfflineOperation,
+  getOfflineOperations,
+  readOfflineCache,
+  syncOfflineQueue,
+  writeOfflineCache,
+} from "@/lib/offlineStore";
+import { dispatchDailyResetDataChanged } from "@/lib/dailyResetEvents";
 
-type WeightUnit = "lbs" | "kg";
+type WeightUnit =
+  | "lbs"
+  | "kg";
 
 type WeightLog = {
   id: string;
@@ -16,6 +29,7 @@ type WeightLog = {
   weight: number;
   unit: WeightUnit;
   note: string | null;
+  pending?: boolean;
 };
 
 type BodyDataPanelProps = {
@@ -23,10 +37,8 @@ type BodyDataPanelProps = {
   timeZone: string;
 };
 
-type WeightApiResponse = {
-  log?: WeightLog;
-  error?: string;
-};
+const CACHE_KEY =
+  "daily-reset:weight-logs:v1";
 
 export function BodyDataPanel({
   initialLogs,
@@ -35,42 +47,146 @@ export function BodyDataPanel({
   const [isPending, startTransition] =
     useTransition();
   const [logs, setLogs] =
-    useState<WeightLog[]>(initialLogs);
+    useState<WeightLog[]>(
+      initialLogs
+    );
   const [weight, setWeight] =
     useState("");
   const [unit, setUnit] =
     useState<WeightUnit>(
-      initialLogs[0]?.unit ?? "lbs"
+      initialLogs[0]?.unit ??
+        "lbs"
     );
   const [message, setMessage] =
-    useState<string | null>(null);
+    useState<string | null>(
+      null
+    );
 
-  const today = getDateKey(timeZone);
+  const today =
+    getDateKey(timeZone);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (navigator.onLine) {
+      return;
+    }
+
+    void readOfflineCache<
+      WeightLog[]
+    >(CACHE_KEY).then(
+      (cached) => {
+        if (
+          !cancelled &&
+          cached &&
+          cached.length > 0
+        ) {
+          setLogs(cached);
+        }
+      }
+    );
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    void writeOfflineCache(
+      CACHE_KEY,
+      logs
+    );
+  }, [logs]);
+
+  useEffect(() => {
+    const refreshPending =
+      async () => {
+        const operations =
+          await getOfflineOperations();
+        const pendingDates =
+          new Set(
+            operations
+              .filter(
+                (operation) =>
+                  operation.kind ===
+                  "weight"
+              )
+              .map(
+                (operation) =>
+                  operation.kind ===
+                  "weight"
+                    ? operation
+                        .payload
+                        .date
+                    : ""
+              )
+          );
+
+        setLogs((current) =>
+          current.map((log) => ({
+            ...log,
+            pending:
+              pendingDates.has(
+                log.date
+              ),
+          }))
+        );
+      };
+
+    const handleQueue =
+      () => {
+        void refreshPending();
+      };
+
+    window.addEventListener(
+      OFFLINE_QUEUE_EVENT,
+      handleQueue
+    );
+
+    void refreshPending();
+
+    return () => {
+      window.removeEventListener(
+        OFFLINE_QUEUE_EVENT,
+        handleQueue
+      );
+    };
+  }, []);
 
   const sortedLogs = useMemo(
     () =>
-      [...logs].sort((a, b) =>
-        b.date.localeCompare(a.date)
+      [...logs].sort(
+        (a, b) =>
+          b.date.localeCompare(
+            a.date
+          )
       ),
     [logs]
   );
 
-  const latest = sortedLogs[0] ?? null;
-  const previous = sortedLogs[1] ?? null;
+  const latest =
+    sortedLogs[0] ?? null;
+  const previous =
+    sortedLogs[1] ?? null;
 
   const trend = useMemo(() => {
     if (
       !latest ||
       !previous ||
-      latest.unit !== previous.unit
+      latest.unit !==
+        previous.unit
     ) {
       return "NO TREND";
     }
 
     const difference =
-      latest.weight - previous.weight;
+      latest.weight -
+      previous.weight;
 
-    if (Math.abs(difference) < 0.01) {
+    if (
+      Math.abs(difference) <
+      0.01
+    ) {
       return "STABLE";
     }
 
@@ -80,11 +196,14 @@ export function BodyDataPanel({
   }, [latest, previous]);
 
   function saveWeight() {
-    const parsedWeight = Number(weight);
+    const parsedWeight =
+      Number(weight);
 
     if (
       !weight ||
-      !Number.isFinite(parsedWeight) ||
+      !Number.isFinite(
+        parsedWeight
+      ) ||
       parsedWeight <= 0
     ) {
       setMessage(
@@ -95,74 +214,123 @@ export function BodyDataPanel({
 
     setMessage(null);
 
-    startTransition(async () => {
-      try {
-        const response = await fetch(
-          "/api/weight-logs",
+    startTransition(
+      async () => {
+        const entityId =
+          createOfflineEntityId();
+        const operationId =
+          `weight:${today}`;
+        const createdAt =
+          new Date().toISOString();
+        const savedLog: WeightLog =
           {
-            method: "POST",
-            headers: {
-              "Content-Type":
-                "application/json",
-            },
-            credentials: "same-origin",
-            cache: "no-store",
-            body: JSON.stringify({
-              date: today,
-              weight: parsedWeight,
-              unit,
-              note: null,
-            }),
-          }
-        );
-
-        const payload =
-          (await response
-            .json()
-            .catch(() => null)) as
-            | WeightApiResponse
-            | null;
-
-        if (
-          !response.ok ||
-          !payload?.log
-        ) {
-          throw new Error(
-            payload?.error ??
-              "Weight signal could not be saved."
-          );
-        }
+            id: entityId,
+            date: today,
+            weight:
+              parsedWeight,
+            unit,
+            note: null,
+            pending: true,
+          };
 
         setLogs((current) => [
-          payload.log as WeightLog,
+          savedLog,
           ...current.filter(
             (log) =>
-              log.id !==
-                payload.log?.id &&
-              log.date !==
-                payload.log?.date
+              log.date !== today
           ),
         ]);
-
         setWeight("");
-        setMessage(
-          "Today's body signal saved."
-        );
-      } catch (error) {
-        setMessage(
-          error instanceof Error
-            ? error.message
-            : "Weight signal could not be saved."
-        );
+
+        try {
+          await enqueueOfflineOperation(
+            {
+              id:
+                operationId,
+              kind: "weight",
+              createdAt,
+              payload: {
+                entityId,
+                date: today,
+                weight:
+                  parsedWeight,
+                unit,
+                note: null,
+              },
+            }
+          );
+
+          dispatchDailyResetDataChanged(
+            {
+              scopes: ["body"],
+              source:
+                "weight",
+              date: today,
+              metrics: {
+                latestWeight:
+                  parsedWeight,
+                weightUnit:
+                  unit,
+              },
+            }
+          );
+
+          const summary =
+            await syncOfflineQueue();
+          const stillPending =
+            (
+              await getOfflineOperations()
+            ).some(
+              (operation) =>
+                operation.id ===
+                operationId
+            );
+
+          setLogs(
+            (current) =>
+              current.map(
+                (log) =>
+                  log.date ===
+                  today
+                    ? {
+                        ...log,
+                        pending:
+                          stillPending,
+                      }
+                    : log
+              )
+          );
+
+          setMessage(
+            stillPending ||
+              summary.errors.length >
+                0
+              ? "Body signal saved offline. It will sync automatically."
+              : "Today's body signal saved."
+          );
+        } catch (error) {
+          setLogs(
+            (current) =>
+              current.filter(
+                (log) =>
+                  log.id !==
+                  entityId
+              )
+          );
+          setMessage(
+            error instanceof Error
+              ? error.message
+              : "Body signal could not be saved locally."
+          );
+        }
       }
-    });
+    );
   }
 
   return (
     <TerminalBlock title="body.data">
       <div className="grid gap-4 lg:grid-cols-[1fr_0.8fr]">
         <div>
-
           <div className="grid gap-3 sm:grid-cols-[1fr_1fr_150px]">
             <div className="border border-[#242424] bg-[#080808] px-3 py-3">
               <FieldLabel>
@@ -174,21 +342,28 @@ export function BodyDataPanel({
             </div>
 
             <label className="block">
-              <FieldLabel>Weight</FieldLabel>
+              <FieldLabel>
+                Weight
+              </FieldLabel>
               <input
                 value={weight}
                 onChange={(event) =>
                   setWeight(
-                    event.target.value
+                    event.target
+                      .value
                   )
                 }
                 inputMode="decimal"
-                className={inputClassName}
+                className={
+                  inputClassName
+                }
               />
             </label>
 
             <label className="block">
-              <FieldLabel>Unit</FieldLabel>
+              <FieldLabel>
+                Unit
+              </FieldLabel>
               <select
                 value={unit}
                 onChange={(event) =>
@@ -197,7 +372,9 @@ export function BodyDataPanel({
                       .value as WeightUnit
                   )
                 }
-                className={inputClassName}
+                className={
+                  inputClassName
+                }
               >
                 <option value="lbs">
                   lbs
@@ -236,7 +413,9 @@ export function BodyDataPanel({
                 ? `${latest.weight} ${latest.unit}`
                 : "NO SIGNAL"
             }
-            green={Boolean(latest)}
+            green={
+              Boolean(latest)
+            }
           />
           <TerminalRow
             label="DATE"
@@ -260,6 +439,19 @@ export function BodyDataPanel({
               logs.length > 0
             }
           />
+          <TerminalRow
+            label="SYNC"
+            value={
+              latest?.pending
+                ? "PENDING"
+                : "CURRENT"
+            }
+            green={
+              Boolean(
+                latest?.pending
+              )
+            }
+          />
         </div>
       </div>
 
@@ -270,13 +462,18 @@ export function BodyDataPanel({
           summary="Saved weight history"
         >
           <div className="max-h-[320px] overflow-y-auto border border-[#242424]">
-            {sortedLogs.length > 0 ? (
+            {sortedLogs.length >
+            0 ? (
               sortedLogs.map(
                 (log, index) => (
                   <SignalEntryDisclosure
                     key={`${log.id}-${log.date}-${index}`}
                     title={`${log.weight} ${log.unit}`}
-                    meta={log.date}
+                    meta={
+                      log.pending
+                        ? `${log.date} · pending sync`
+                        : log.date
+                    }
                   >
                     <div className="grid gap-2 sm:grid-cols-[110px_100px_1fr]">
                       <span className="terminal-muted">
@@ -287,8 +484,10 @@ export function BodyDataPanel({
                         {log.unit}
                       </span>
                       <span className="terminal-muted">
-                        {log.note ??
-                          "Body signal"}
+                        {log.pending
+                          ? "Saved locally — pending sync"
+                          : log.note ??
+                            "Body signal"}
                       </span>
                     </div>
                   </SignalEntryDisclosure>
@@ -296,8 +495,7 @@ export function BodyDataPanel({
               )
             ) : (
               <p className="terminal-muted p-3 text-xs">
-                &gt; No body signals
-                logged yet.
+                &gt; No body signals logged yet.
               </p>
             )}
           </div>
@@ -313,7 +511,8 @@ const inputClassName =
 function FieldLabel({
   children,
 }: {
-  children: React.ReactNode;
+  children:
+    React.ReactNode;
 }) {
   return (
     <span className="terminal-muted text-[11px] uppercase tracking-[0.18em]">
@@ -326,10 +525,16 @@ function TerminalBlock({
   children,
 }: {
   title: string;
-  children: React.ReactNode;
+  children:
+    React.ReactNode;
 }) {
-  return <div className="p-3">{children}</div>;
+  return (
+    <div className="p-3">
+      {children}
+    </div>
+  );
 }
+
 function TerminalRow({
   label,
   value,

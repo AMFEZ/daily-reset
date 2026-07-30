@@ -1,15 +1,34 @@
 "use client";
 
 import {
+  useEffect,
   useMemo,
   useState,
   useTransition,
   type ReactNode,
 } from "react";
-import { ContextAudioRecorder } from "@/components/reset/ContextAudioRecorder";
+import {
+  ContextAudioRecorder,
+  type CapturedAudioState,
+} from "@/components/reset/ContextAudioRecorder";
 import { SignalDisclosure } from "@/components/reset/SignalDisclosure";
 import { SignalEntryDisclosure } from "@/components/reset/SignalEntryDisclosure";
 import { completeActivityHabit } from "@/lib/completeActivityHabit";
+import { dispatchDailyResetDataChanged } from "@/lib/dailyResetEvents";
+import {
+  OFFLINE_QUEUE_EVENT,
+  cancelPendingAudioForEntity,
+  createOfflineAudioPreviewUrl,
+  createOfflineEntityId,
+  enqueueOfflineOperation,
+  getOfflineOperations,
+  getPendingAudioUpload,
+  readOfflineCache,
+  removeOfflineAudio,
+  removeOfflineOperation,
+  syncOfflineQueue,
+  writeOfflineCache,
+} from "@/lib/offlineStore";
 import { createClient } from "@/utils/supabase/client";
 
 type CaptureMode = "manual" | "voice";
@@ -27,6 +46,7 @@ type DreamEntry = {
   raw_transcript: string | null;
   cleaned_transcript: string | null;
   created_at: string;
+  pending?: boolean;
 };
 
 type SavedDreamEntryRow = {
@@ -82,6 +102,15 @@ type DreamMutationResponse = {
   error?: string;
 };
 
+type PendingAudioCapture = {
+  blobKey: string;
+  storagePath: string;
+  contentType: string;
+};
+
+const DREAM_CACHE_KEY =
+  "daily-reset:dream-entries:v1";
+
 export function DreamArchivePanel({
   initialEntries,
   initialInterpretations,
@@ -115,6 +144,12 @@ export function DreamArchivePanel({
     useState<string | null>(null);
   const [audioPreviewUrl, setAudioPreviewUrl] =
     useState<string | null>(null);
+  const [
+    pendingAudioCapture,
+    setPendingAudioCapture,
+  ] = useState<PendingAudioCapture | null>(
+    null
+  );
   const [rawTranscript, setRawTranscript] =
     useState("");
   const [cleanedTranscript, setCleanedTranscript] =
@@ -132,6 +167,118 @@ export function DreamArchivePanel({
     useState<string | null>(null);
   const [message, setMessage] =
     useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (navigator.onLine) {
+      return;
+    }
+
+    void readOfflineCache<DreamEntry[]>(
+      DREAM_CACHE_KEY
+    ).then((cached) => {
+      if (
+        !cancelled &&
+        cached &&
+        cached.length > 0
+      ) {
+        setEntries(cached);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    void writeOfflineCache(
+      DREAM_CACHE_KEY,
+      entries
+    );
+  }, [entries]);
+
+  useEffect(() => {
+    const refreshPending = async () => {
+      const operations =
+        await getOfflineOperations();
+      const pendingIds = new Set(
+        operations
+          .filter(
+            (operation) =>
+              (
+                operation.kind ===
+                  "journal" &&
+                operation.payload
+                  .entryType ===
+                  "dream"
+              ) ||
+              (
+                operation.kind ===
+                  "audio-upload" &&
+                operation.payload
+                  .entryType ===
+                  "dream"
+              )
+          )
+          .map((operation) =>
+            operation.kind ===
+              "journal" ||
+            operation.kind ===
+              "audio-upload"
+              ? operation.payload
+                  .entityId
+              : ""
+          )
+      );
+
+      setEntries((current) =>
+        current.map((entry) => ({
+          ...entry,
+          pending: pendingIds.has(entry.id),
+        }))
+      );
+    };
+
+    const handleQueue = (
+      event: Event
+    ) => {
+      const detail = (
+        event as CustomEvent<{
+          lastError?: string | null;
+        }>
+      ).detail;
+
+      if (
+        detail?.lastError?.startsWith(
+          "[CONFLICT]"
+        ) ||
+        detail?.lastError?.startsWith(
+          "[MISSING AUDIO]"
+        )
+      ) {
+        setMessage(
+          detail.lastError
+        );
+      }
+
+      void refreshPending();
+    };
+
+    window.addEventListener(
+      OFFLINE_QUEUE_EVENT,
+      handleQueue
+    );
+    void refreshPending();
+
+    return () => {
+      window.removeEventListener(
+        OFFLINE_QUEUE_EVENT,
+        handleQueue
+      );
+    };
+  }, []);
 
   const sortedEntries = useMemo(
     () =>
@@ -165,6 +312,9 @@ export function DreamArchivePanel({
 
   const canInterpretCurrent = Boolean(
     activeEntryId &&
+      !entries.find((entry) =>
+        entry.id === activeEntryId
+      )?.pending &&
       !hasUnsavedChanges &&
       currentSourceText.length >= 2
   );
@@ -175,6 +325,15 @@ export function DreamArchivePanel({
   }
 
   function resetEditor() {
+    if (
+      pendingAudioCapture &&
+      !activeEntryId
+    ) {
+      void removeOfflineAudio(
+        pendingAudioCapture.blobKey
+      );
+    }
+
     setCaptureMode("manual");
     setActiveEntryId(null);
     setActiveCreatedAt(null);
@@ -186,6 +345,7 @@ export function DreamArchivePanel({
     setPlaces("");
     setAudioPath(null);
     setAudioPreviewUrl(null);
+    setPendingAudioCapture(null);
     setRawTranscript("");
     setCleanedTranscript("");
     setMessage(null);
@@ -201,8 +361,18 @@ export function DreamArchivePanel({
     setMessage(null);
 
     if (nextMode === "manual") {
+      if (
+        pendingAudioCapture &&
+        !activeEntryId
+      ) {
+        void removeOfflineAudio(
+          pendingAudioCapture.blobKey
+        );
+      }
+
       setAudioPath(null);
       setAudioPreviewUrl(null);
+      setPendingAudioCapture(null);
       setRawTranscript("");
       setCleanedTranscript("");
     } else {
@@ -230,6 +400,36 @@ export function DreamArchivePanel({
     setPlaces("");
     setAudioPath(entry.audio_path);
     setAudioPreviewUrl(null);
+    setPendingAudioCapture(null);
+
+    void getPendingAudioUpload(
+      entry.id
+    ).then(async (operation) => {
+      if (!operation) {
+        return;
+      }
+
+      setPendingAudioCapture({
+        blobKey:
+          operation.payload.blobKey,
+        storagePath:
+          operation.payload.storagePath,
+        contentType:
+          operation.payload.contentType,
+      });
+
+      const previewUrl =
+        await createOfflineAudioPreviewUrl(
+          entry.id
+        );
+
+      if (previewUrl) {
+        setAudioPreviewUrl(
+          previewUrl
+        );
+      }
+    });
+
     setRawTranscript(
       entry.raw_transcript ?? ""
     );
@@ -275,7 +475,7 @@ export function DreamArchivePanel({
       !audioPath
     ) {
       setMessage(
-        "Record and upload the dream before saving."
+        "Record the dream before saving."
       );
       return;
     }
@@ -283,160 +483,212 @@ export function DreamArchivePanel({
     setMessage(null);
 
     startTransition(async () => {
-      if (activeEntryId) {
-        try {
-          const updated = await updateDream(
-            activeEntryId,
-            {
-              title: cleanTitle,
-              content: cleanContent,
-              symbols: parsedSymbols,
-              captureMode,
-              audioPath,
-              rawTranscript: cleanRaw,
-              cleanedTranscript:
-                cleanCleaned,
-            }
-          );
-
-          setEntries((current) =>
-            current.map((entry) =>
-              entry.id === updated.id
-                ? updated
-                : entry
-            )
-          );
-          setInterpretations((current) =>
-            current.filter(
-              (item) =>
-                item.journal_entry_id !==
-                updated.id
-            )
-          );
-          setHasUnsavedChanges(false);
-          setMessage(
-            "Dream updated. Any older AI interpretation was cleared so it cannot become stale."
-          );
-        } catch (error) {
-          setMessage(
-            error instanceof Error
-              ? `Update failed: ${error.message}`
-              : "Dream update failed."
-          );
-        }
-        return;
-      }
-
-      const { data: rawData, error } =
-        await supabase
-          .rpc("add_dream_entry", {
-            target_title: cleanTitle,
-            target_content:
-              captureMode === "manual"
-                ? cleanContent
-                : "",
-            target_mood: "",
-            target_emotion: "",
-            target_symbols:
-              parsedSymbols,
-            target_people:
-              parseList(people),
-            target_places:
-              parseList(places),
-            target_tags: [],
-            target_audio_path:
-              captureMode === "voice"
-                ? audioPath ?? ""
-                : "",
-            target_raw_transcript:
-              captureMode === "voice"
-                ? cleanRaw
-                : "",
-            target_cleaned_transcript:
-              captureMode === "voice"
-                ? cleanCleaned
-                : "",
-          })
-          .single();
-
-      if (error) {
-        setMessage(
-          `Save failed: ${error.message}`
-        );
-        return;
-      }
-
-      if (!rawData) {
-        setMessage(
-          "Dream saved, but no record was returned."
-        );
-        return;
-      }
-
-      const data =
-        rawData as unknown as SavedDreamEntryRow;
-
+      const existingEntry = activeEntryId
+        ? entries.find(
+            (entry) =>
+              entry.id === activeEntryId
+          ) ?? null
+        : null;
+      const entityId =
+        existingEntry?.id ??
+        createOfflineEntityId();
+      const createdAt =
+        existingEntry?.created_at ??
+        new Date().toISOString();
+      const mutationAt =
+        new Date().toISOString();
+      const hasNewAudio = Boolean(
+        captureMode === "voice" &&
+          pendingAudioCapture
+      );
+      const localAudioPath =
+        captureMode === "voice"
+          ? audioPath
+          : null;
+      const serverAudioPath =
+        captureMode === "voice"
+          ? hasNewAudio
+            ? existingEntry?.pending
+              ? null
+              : existingEntry?.audio_path ?? null
+            : audioPath
+          : null;
+      const nextRawTranscript =
+        captureMode === "voice" &&
+        !hasNewAudio
+          ? cleanRaw || null
+          : null;
+      const nextCleanedTranscript =
+        captureMode === "voice" &&
+        !hasNewAudio
+          ? cleanCleaned || null
+          : null;
+      const storedContent =
+        captureMode === "manual"
+          ? cleanContent
+          : cleanCleaned ||
+            cleanRaw ||
+            "Voice dream awaiting transcription.";
       const savedEntry: DreamEntry = {
-        id: data.log_id,
+        id: entityId,
         entry_type: "dream",
-        title: data.log_title,
-        content:
-          captureMode === "manual"
-            ? data.log_content
-            : "",
-        mood: data.log_mood,
-        energy: data.log_energy,
-        tags: data.log_tags ?? [],
+        title: cleanTitle || null,
+        content: storedContent,
+        mood:
+          existingEntry?.mood ?? null,
+        energy:
+          existingEntry?.energy ?? null,
+        tags:
+          existingEntry?.tags ?? [],
         symbols: parsedSymbols,
-        audio_path:
-          captureMode === "voice"
-            ? data.log_audio_path ||
-              audioPath ||
-              null
-            : null,
+        audio_path: localAudioPath,
         raw_transcript:
-          captureMode === "voice"
-            ? data.log_raw_transcript
-            : null,
+          nextRawTranscript,
         cleaned_transcript:
-          captureMode === "voice"
-            ? data.log_cleaned_transcript
-            : null,
-        created_at: data.log_created_at,
+          nextCleanedTranscript,
+        created_at: createdAt,
+        pending: true,
       };
 
-      setEntries((current) => [
-        savedEntry,
-        ...current,
-      ]);
-      setActiveEntryId(savedEntry.id);
-      setActiveCreatedAt(
-        savedEntry.created_at
-      );
-      setAudioPath(savedEntry.audio_path);
-      setRawTranscript(
-        savedEntry.raw_transcript ?? ""
-      );
-      setCleanedTranscript(
-        savedEntry.cleaned_transcript ?? ""
-      );
-      setHasUnsavedChanges(false);
-
       try {
-        const matchedHabit =
-          await completeActivityHabit({
+        await removeOfflineOperation(
+          `journal-delete:${entityId}`
+        );
+
+        if (
+          captureMode === "manual"
+        ) {
+          await cancelPendingAudioForEntity(
+            entityId
+          );
+        }
+
+        await enqueueOfflineOperation({
+          id: `journal:${entityId}`,
+          kind: "journal",
+          createdAt: mutationAt,
+          payload: {
+            entityId,
+            entryType: "dream",
+            title: cleanTitle || null,
+            content: storedContent,
+            mood:
+              existingEntry?.mood ?? null,
+            energy:
+              existingEntry?.energy ?? null,
+            tags:
+              existingEntry?.tags ?? [],
+            symbols: parsedSymbols,
+            createdAt,
+            audioPath:
+              serverAudioPath,
+            rawTranscript:
+              nextRawTranscript,
+            cleanedTranscript:
+              nextCleanedTranscript,
+            conflictGuard: Boolean(
+              existingEntry &&
+                !existingEntry.pending
+            ),
             activity: "dream",
             date: getLocalDateKey(),
+          },
+        });
+
+        if (
+          hasNewAudio &&
+          pendingAudioCapture
+        ) {
+          await enqueueOfflineOperation({
+            id:
+              `audio-upload:${entityId}`,
+            kind: "audio-upload",
+            createdAt: mutationAt,
+            payload: {
+              entityId,
+              entryType: "dream",
+              blobKey:
+                pendingAudioCapture.blobKey,
+              storagePath:
+                pendingAudioCapture.storagePath,
+              contentType:
+                pendingAudioCapture.contentType,
+            },
           });
+        }
+
+        setEntries((current) => [
+          savedEntry,
+          ...current.filter(
+            (entry) =>
+              entry.id !== entityId
+          ),
+        ]);
+        setInterpretations((current) =>
+          current.filter(
+            (item) =>
+              item.journal_entry_id !==
+              entityId
+          )
+        );
+        setActiveEntryId(entityId);
+        setActiveCreatedAt(createdAt);
+        setHasUnsavedChanges(false);
+
+        dispatchDailyResetDataChanged({
+          scopes: [
+            "journal",
+            "analytics",
+          ],
+          source: "dream",
+          date: getLocalDateKey(),
+        });
+
+        const summary =
+          await syncOfflineQueue();
+        const stillPending =
+          (
+            await getOfflineOperations()
+          ).some(
+            (operation) =>
+              operation.id ===
+                `journal:${entityId}` ||
+              operation.id ===
+                `audio-upload:${entityId}`
+          );
+
+        setEntries((current) =>
+          current.map((entry) =>
+            entry.id === entityId
+              ? {
+                  ...entry,
+                  pending: stillPending,
+                }
+              : entry
+          )
+        );
+
+        if (!stillPending) {
+          setPendingAudioCapture(null);
+        }
+
+        const conflict =
+          summary.conflicts[0];
 
         setMessage(
-          `Dream saved. ${matchedHabit.name} completed. You can now transcribe or interpret it.`
+          conflict ??
+            (stillPending ||
+            summary.errors.length > 0
+              ? "Dream saved on this device. It will retry automatically."
+              : captureMode === "voice"
+                ? "Dream and recording synced. Transcription is ready."
+                : "Dream saved and synced.")
         );
-      } catch (syncError) {
+      } catch (error) {
         setMessage(
-          syncError instanceof Error
-            ? `Dream saved, but habit sync failed: ${syncError.message}`
-            : "Dream saved, but the dream habit could not be completed."
+          error instanceof Error
+            ? error.message
+            : "Dream could not be stored on this device."
         );
       }
     });
@@ -485,9 +737,16 @@ export function DreamArchivePanel({
   async function transcribeDream(
     entry: Pick<
       DreamEntry,
-      "id" | "audio_path"
+      "id" | "audio_path" | "pending"
     >
   ) {
+    if (entry.pending || !navigator.onLine) {
+      setMessage(
+        "Sync the dream before transcription."
+      );
+      return;
+    }
+
     if (!entry.audio_path) {
       setMessage(
         "No audio is attached to this dream."
@@ -587,55 +846,31 @@ export function DreamArchivePanel({
       return;
     }
 
-    setMessage(null);
-
-    try {
-      const updated = await updateDream(
-        activeEntryId,
-        {
-          title: title.trim(),
-          content: "",
-          symbols:
-            parseList(symbols),
-          captureMode: "voice",
-          audioPath,
-          rawTranscript: "",
-          cleanedTranscript: "",
-        }
-      );
-
-      setEntries((current) =>
-        current.map((entry) =>
-          entry.id === updated.id
-            ? updated
-            : entry
-        )
-      );
-      setInterpretations((current) =>
-        current.filter(
-          (item) =>
-            item.journal_entry_id !==
-            activeEntryId
-        )
-      );
-      setRawTranscript("");
-      setCleanedTranscript("");
-      setHasUnsavedChanges(false);
-      setMessage(
-        "Transcript deleted. The audio recording remains attached."
-      );
-    } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "Transcript deletion failed."
-      );
-    }
+    setRawTranscript("");
+    setCleanedTranscript("");
+    setHasUnsavedChanges(true);
+    setInterpretations((current) =>
+      current.filter(
+        (item) =>
+          item.journal_entry_id !==
+          activeEntryId
+      )
+    );
+    setMessage(
+      "Transcript cleared in the editor. Save changes to sync the deletion."
+    );
   }
 
   async function interpretDream(
     entry: DreamEntry
   ) {
+    if (entry.pending || !navigator.onLine) {
+      setMessage(
+        "Sync the dream before AI interpretation."
+      );
+      return;
+    }
+
     setInterpretingEntryId(entry.id);
     setMessage(null);
 
@@ -668,16 +903,16 @@ export function DreamArchivePanel({
       }
 
       const interpretation =
-  result.interpretation;
+        result.interpretation;
 
-setInterpretations((current) => [
-  interpretation,
-  ...current.filter(
-    (item) =>
-      item.journal_entry_id !==
-      entry.id
-  ),
-]);
+      setInterpretations((current) => [
+        interpretation,
+        ...current.filter(
+          (item) =>
+            item.journal_entry_id !==
+            entry.id
+        ),
+      ]);
 
       setMessage(
         "Dream interpretation generated."
@@ -720,28 +955,22 @@ setInterpretations((current) => [
     setMessage(null);
 
     try {
-      const response = await fetch(
-        `/api/dreams/${entry.id}`,
-        {
-          method: "DELETE",
-        }
+      await removeOfflineOperation(
+        `journal:${entry.id}`
       );
-
-      const result =
-        (await response.json()) as {
-          deletedId?: string;
-          error?: string;
-        };
-
-      if (
-        !response.ok ||
-        !result.deletedId
-      ) {
-        throw new Error(
-          result.error ??
-            "Dream deletion failed."
-        );
-      }
+      await cancelPendingAudioForEntity(
+        entry.id
+      );
+      await enqueueOfflineOperation({
+        id:
+          `journal-delete:${entry.id}`,
+        kind: "journal-delete",
+        createdAt:
+          new Date().toISOString(),
+        payload: {
+          entityId: entry.id,
+        },
+      });
 
       setEntries((current) =>
         current.filter(
@@ -761,7 +990,23 @@ setInterpretations((current) => [
         resetEditor();
       }
 
-      setMessage("Dream deleted.");
+      const summary =
+        await syncOfflineQueue();
+      const stillPending =
+        (
+          await getOfflineOperations()
+        ).some(
+          (operation) =>
+            operation.id ===
+            `journal-delete:${entry.id}`
+        );
+
+      setMessage(
+        stillPending ||
+          summary.errors.length > 0
+          ? "Dream deletion saved on this device. It will sync automatically."
+          : "Dream and attached audio deleted."
+      );
     } catch (error) {
       setMessage(
         error instanceof Error
@@ -940,11 +1185,27 @@ setInterpretations((current) => [
                 <ContextAudioRecorder
                   onAudioUploaded={(
                     path,
-                    previewUrl
+                    previewUrl,
+                    captureState
                   ) => {
+                    if (
+                      pendingAudioCapture &&
+                      pendingAudioCapture.blobKey !==
+                        captureState?.blobKey
+                    ) {
+                      void removeOfflineAudio(
+                        pendingAudioCapture.blobKey
+                      );
+                    }
+
                     setAudioPath(path);
                     setAudioPreviewUrl(
                       previewUrl
+                    );
+                    setPendingAudioCapture(
+                      toPendingAudioCapture(
+                        captureState
+                      )
                     );
                     setRawTranscript("");
                     setCleanedTranscript("");
@@ -952,16 +1213,27 @@ setInterpretations((current) => [
                       true
                     );
                     setMessage(
-                      "Audio uploaded. Save the dream before transcription."
+                      captureState?.pendingUpload
+                        ? "Audio saved on this device. Save the dream to queue upload."
+                        : "Audio uploaded. Save the dream before transcription."
                     );
                   }}
+                  contextLabel="dream"
                   savedDreamId={
-                    hasUnsavedChanges
+                    hasUnsavedChanges ||
+                    activeEntry?.pending ||
+                    Boolean(
+                      pendingAudioCapture
+                    )
                       ? null
                       : activeEntryId
                   }
                   savedAudioPath={
-                    hasUnsavedChanges
+                    hasUnsavedChanges ||
+                    activeEntry?.pending ||
+                    Boolean(
+                      pendingAudioCapture
+                    )
                       ? null
                       : audioPath
                   }
@@ -976,7 +1248,11 @@ setInterpretations((current) => [
                     if (
                       !activeEntryId ||
                       !audioPath ||
-                      hasUnsavedChanges
+                      hasUnsavedChanges ||
+                      activeEntry?.pending ||
+                      Boolean(
+                        pendingAudioCapture
+                      )
                     ) {
                       setMessage(
                         "Save the voice dream before transcribing it."
@@ -988,6 +1264,8 @@ setInterpretations((current) => [
                       id: activeEntryId,
                       audio_path:
                         audioPath,
+                      pending:
+                        activeEntry?.pending,
                     });
                   }}
                 />
@@ -995,7 +1273,11 @@ setInterpretations((current) => [
                 {audioPath ? (
                   <div className="mt-3 border-t border-[#242424] pt-3">
                     <p className="terminal-green text-xs">
-                      &gt; recording attached
+                      &gt;{" "}
+                      {pendingAudioCapture ||
+                      activeEntry?.pending
+                        ? "recording stored on device"
+                        : "recording attached"}
                     </p>
                     <p className="terminal-muted mt-1 break-all text-[10px]">
                       {audioPath}
@@ -1090,6 +1372,8 @@ setInterpretations((current) => [
                 ? "interpreting dream..."
                 : !activeEntryId
                   ? "save first, then interpret"
+                  : activeEntry?.pending
+                    ? "waiting for sync"
                   : hasUnsavedChanges
                     ? "save changes before interpretation"
                     : interpretationByEntry[
@@ -1186,13 +1470,19 @@ setInterpretations((current) => [
                         entry.title ||
                         "Untitled Dream"
                       }
-                      meta={timestamp}
+                      meta={
+                        entry.pending
+                          ? `${timestamp} · pending sync`
+                          : timestamp
+                      }
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <span className="border border-[#365341] bg-[#06110a] px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-[#9fd8b5]">
-                          {isVoice
-                            ? "voice"
-                            : "manual"}
+                          {entry.pending
+                            ? "manual · pending sync"
+                            : isVoice
+                              ? "voice"
+                              : "manual"}
                         </span>
 
                         <div className="flex flex-wrap gap-2">
@@ -1325,6 +1615,28 @@ setInterpretations((current) => [
       </div>
     </TerminalBlock>
   );
+}
+
+function toPendingAudioCapture(
+  captureState:
+    | CapturedAudioState
+    | undefined
+): PendingAudioCapture | null {
+  if (
+    !captureState?.pendingUpload ||
+    !captureState.blobKey
+  ) {
+    return null;
+  }
+
+  return {
+    blobKey:
+      captureState.blobKey,
+    storagePath:
+      captureState.storagePath,
+    contentType:
+      captureState.contentType,
+  };
 }
 
 function ModeButton({
@@ -1518,7 +1830,7 @@ function FieldLabel({
 function TerminalBlock({
   children,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return <div className="p-3">{children}</div>;
 }

@@ -1,15 +1,34 @@
 "use client";
 
 import {
+  useEffect,
   useMemo,
   useState,
   useTransition,
   type ReactNode,
 } from "react";
-import { ContextAudioRecorder } from "@/components/reset/ContextAudioRecorder";
+import {
+  ContextAudioRecorder,
+  type CapturedAudioState,
+} from "@/components/reset/ContextAudioRecorder";
 import { SignalDisclosure } from "@/components/reset/SignalDisclosure";
 import { SignalEntryDisclosure } from "@/components/reset/SignalEntryDisclosure";
 import { completeActivityHabit } from "@/lib/completeActivityHabit";
+import { dispatchDailyResetDataChanged } from "@/lib/dailyResetEvents";
+import {
+  OFFLINE_QUEUE_EVENT,
+  cancelPendingAudioForEntity,
+  createOfflineAudioPreviewUrl,
+  createOfflineEntityId,
+  enqueueOfflineOperation,
+  getOfflineOperations,
+  getPendingAudioUpload,
+  readOfflineCache,
+  removeOfflineAudio,
+  removeOfflineOperation,
+  syncOfflineQueue,
+  writeOfflineCache,
+} from "@/lib/offlineStore";
 import { createClient } from "@/utils/supabase/client";
 
 type CaptureMode = "manual" | "voice";
@@ -26,6 +45,7 @@ type ShadowEntry = {
   raw_transcript: string | null;
   cleaned_transcript: string | null;
   created_at: string;
+  pending?: boolean;
 };
 
 type SavedShadowEntryRow = {
@@ -74,7 +94,15 @@ type ShadowMutationResponse = {
   error?: string;
 };
 
+type PendingAudioCapture = {
+  blobKey: string;
+  storagePath: string;
+  contentType: string;
+};
+
 const ACTION_MARKER = "\n\n[GROUNDED ACTION]\n";
+const SHADOW_CACHE_KEY =
+  "daily-reset:shadow-entries:v1";
 
 const hardShadowPrompts = [
   "What truth am I avoiding because admitting it would force me to change?",
@@ -132,6 +160,12 @@ export function ShadowConsolePanel({
   const [audioPath, setAudioPath] = useState<string | null>(null);
   const [audioPreviewUrl, setAudioPreviewUrl] =
     useState<string | null>(null);
+  const [
+    pendingAudioCapture,
+    setPendingAudioCapture,
+  ] = useState<PendingAudioCapture | null>(
+    null
+  );
   const [rawTranscript, setRawTranscript] = useState("");
   const [cleanedTranscript, setCleanedTranscript] = useState("");
   const [transcribingEntryId, setTranscribingEntryId] =
@@ -141,6 +175,118 @@ export function ShadowConsolePanel({
   const [deletingEntryId, setDeletingEntryId] =
     useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (navigator.onLine) {
+      return;
+    }
+
+    void readOfflineCache<ShadowEntry[]>(
+      SHADOW_CACHE_KEY
+    ).then((cached) => {
+      if (
+        !cancelled &&
+        cached &&
+        cached.length > 0
+      ) {
+        setEntries(cached);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    void writeOfflineCache(
+      SHADOW_CACHE_KEY,
+      entries
+    );
+  }, [entries]);
+
+  useEffect(() => {
+    const refreshPending = async () => {
+      const operations =
+        await getOfflineOperations();
+      const pendingIds = new Set(
+        operations
+          .filter(
+            (operation) =>
+              (
+                operation.kind ===
+                  "journal" &&
+                operation.payload
+                  .entryType ===
+                  "shadow"
+              ) ||
+              (
+                operation.kind ===
+                  "audio-upload" &&
+                operation.payload
+                  .entryType ===
+                  "shadow"
+              )
+          )
+          .map((operation) =>
+            operation.kind ===
+              "journal" ||
+            operation.kind ===
+              "audio-upload"
+              ? operation.payload
+                  .entityId
+              : ""
+          )
+      );
+
+      setEntries((current) =>
+        current.map((entry) => ({
+          ...entry,
+          pending: pendingIds.has(entry.id),
+        }))
+      );
+    };
+
+    const handleQueue = (
+      event: Event
+    ) => {
+      const detail = (
+        event as CustomEvent<{
+          lastError?: string | null;
+        }>
+      ).detail;
+
+      if (
+        detail?.lastError?.startsWith(
+          "[CONFLICT]"
+        ) ||
+        detail?.lastError?.startsWith(
+          "[MISSING AUDIO]"
+        )
+      ) {
+        setMessage(
+          detail.lastError
+        );
+      }
+
+      void refreshPending();
+    };
+
+    window.addEventListener(
+      OFFLINE_QUEUE_EVENT,
+      handleQueue
+    );
+    void refreshPending();
+
+    return () => {
+      window.removeEventListener(
+        OFFLINE_QUEUE_EVENT,
+        handleQueue
+      );
+    };
+  }, []);
 
   const sortedEntries = useMemo(
     () =>
@@ -171,6 +317,7 @@ export function ShadowConsolePanel({
 
   const canReflectCurrent = Boolean(
     activeEntryId &&
+      !entries.find((entry) => entry.id === activeEntryId)?.pending &&
       !hasUnsavedChanges &&
       currentSourceText.length >= 2
   );
@@ -185,6 +332,15 @@ export function ShadowConsolePanel({
   }
 
   function resetEditor() {
+    if (
+      pendingAudioCapture &&
+      !activeEntryId
+    ) {
+      void removeOfflineAudio(
+        pendingAudioCapture.blobKey
+      );
+    }
+
     setCaptureMode("manual");
     setActiveEntryId(null);
     setActiveCreatedAt(null);
@@ -194,6 +350,7 @@ export function ShadowConsolePanel({
     setNextAction("");
     setAudioPath(null);
     setAudioPreviewUrl(null);
+    setPendingAudioCapture(null);
     setRawTranscript("");
     setCleanedTranscript("");
     setMessage(null);
@@ -207,8 +364,18 @@ export function ShadowConsolePanel({
     setMessage(null);
 
     if (nextMode === "manual") {
+      if (
+        pendingAudioCapture &&
+        !activeEntryId
+      ) {
+        void removeOfflineAudio(
+          pendingAudioCapture.blobKey
+        );
+      }
+
       setAudioPath(null);
       setAudioPreviewUrl(null);
+      setPendingAudioCapture(null);
       setRawTranscript("");
       setCleanedTranscript("");
     } else {
@@ -228,6 +395,36 @@ export function ShadowConsolePanel({
     setNextAction(parts.action);
     setAudioPath(entry.audio_path);
     setAudioPreviewUrl(null);
+    setPendingAudioCapture(null);
+
+    void getPendingAudioUpload(
+      entry.id
+    ).then(async (operation) => {
+      if (!operation) {
+        return;
+      }
+
+      setPendingAudioCapture({
+        blobKey:
+          operation.payload.blobKey,
+        storagePath:
+          operation.payload.storagePath,
+        contentType:
+          operation.payload.contentType,
+      });
+
+      const previewUrl =
+        await createOfflineAudioPreviewUrl(
+          entry.id
+        );
+
+      if (previewUrl) {
+        setAudioPreviewUrl(
+          previewUrl
+        );
+      }
+    });
+
     setRawTranscript(entry.raw_transcript ?? "");
     setCleanedTranscript(entry.cleaned_transcript ?? "");
     setHasUnsavedChanges(false);
@@ -246,141 +443,251 @@ export function ShadowConsolePanel({
     const cleanResponse = responseText.trim();
     const cleanAction = nextAction.trim();
     const cleanRaw = rawTranscript.trim();
-    const cleanCleaned = cleanedTranscript.trim();
+    const cleanCleaned =
+      cleanedTranscript.trim();
 
     if (cleanPrompt.length < 2) {
-      setMessage("A shadow prompt is required.");
+      setMessage(
+        "A shadow prompt is required."
+      );
       return;
     }
 
-    if (captureMode === "manual" && cleanResponse.length < 2) {
-      setMessage("Write an honest response before saving.");
+    if (
+      captureMode === "manual" &&
+      cleanResponse.length < 2
+    ) {
+      setMessage(
+        "Write an honest response before saving."
+      );
       return;
     }
 
-    if (captureMode === "voice" && !audioPath) {
-      setMessage("Record and upload the shadow response before saving.");
+    if (
+      captureMode === "voice" &&
+      !audioPath
+    ) {
+      setMessage(
+        "Record the shadow response before saving."
+      );
       return;
     }
 
+    const existingEntry = activeEntryId
+      ? entries.find(
+          (entry) =>
+            entry.id === activeEntryId
+        ) ?? null
+      : null;
+    const hasNewAudio = Boolean(
+      captureMode === "voice" &&
+        pendingAudioCapture
+    );
     const sourceText =
       captureMode === "manual"
         ? cleanResponse
-        : cleanCleaned || cleanRaw;
-
-    const storedContent = composeShadowContent(
-      sourceText || "Voice response awaiting transcription.",
-      cleanAction
-    );
+        : cleanCleaned ||
+          cleanRaw ||
+          "Voice response awaiting transcription.";
+    const storedContent =
+      composeShadowContent(
+        sourceText,
+        cleanAction
+      );
 
     setMessage(null);
 
     startTransition(async () => {
-      if (activeEntryId) {
-        try {
-          const updated = await updateShadow(activeEntryId, {
-            title: cleanPrompt,
-            content: storedContent,
-            captureMode,
-            audioPath,
-            rawTranscript: cleanRaw,
-            cleanedTranscript: cleanCleaned,
-          });
-
-          setEntries((current) =>
-            current.map((entry) =>
-              entry.id === updated.id ? updated : entry
-            )
-          );
-          setReflections((current) =>
-            current.filter(
-              (reflection) =>
-                reflection.journal_entry_id !== updated.id
-            )
-          );
-          setHasUnsavedChanges(false);
-          setMessage(
-            "Shadow entry updated. Its older AI reflection was cleared so it cannot become stale."
-          );
-        } catch (error) {
-          setMessage(
-            error instanceof Error
-              ? `Update failed: ${error.message}`
-              : "Shadow update failed."
-          );
-        }
-        return;
-      }
-
-      const { data: rawData, error } = await supabase
-        .rpc("add_shadow_entry", {
-          target_trigger: cleanPrompt,
-          target_emotion: "",
-          target_story: storedContent,
-          target_need: "",
-          target_response: "",
-          target_next_action: cleanAction,
-        })
-        .single();
-
-      if (error) {
-        setMessage(`Save failed: ${error.message}`);
-        return;
-      }
-
-      if (!rawData) {
-        setMessage("Shadow entry saved, but no record was returned.");
-        return;
-      }
-
-      const data = rawData as unknown as SavedShadowEntryRow;
-
-      const attachment = await attachJournalMedia({
-        journalEntryId: data.log_id,
-        audioPath: captureMode === "voice" ? audioPath : null,
-        rawTranscript:
-          captureMode === "voice" ? cleanRaw || null : null,
-        cleanedTranscript:
-          captureMode === "voice" ? cleanCleaned || null : null,
-      });
-
+      const entityId =
+        existingEntry?.id ??
+        createOfflineEntityId();
+      const createdAt =
+        existingEntry?.created_at ??
+        new Date().toISOString();
+      const mutationAt =
+        new Date().toISOString();
+      const localAudioPath =
+        captureMode === "voice"
+          ? audioPath
+          : null;
+      const serverAudioPath =
+        captureMode === "voice"
+          ? hasNewAudio
+            ? existingEntry?.pending
+              ? null
+              : existingEntry?.audio_path ?? null
+            : audioPath
+          : null;
+      const nextRawTranscript =
+        captureMode === "voice" &&
+        !hasNewAudio
+          ? cleanRaw || null
+          : null;
+      const nextCleanedTranscript =
+        captureMode === "voice" &&
+        !hasNewAudio
+          ? cleanCleaned || null
+          : null;
       const savedEntry: ShadowEntry = {
-        id: data.log_id,
+        id: entityId,
         entry_type: "shadow",
-        title: data.log_title || cleanPrompt,
-        content: data.log_content || storedContent,
-        mood: data.log_mood,
-        energy: data.log_energy,
-        tags: data.log_tags ?? [],
-        audio_path: captureMode === "voice" ? audioPath : null,
+        title: cleanPrompt,
+        content: storedContent,
+        mood:
+          existingEntry?.mood ?? null,
+        energy:
+          existingEntry?.energy ?? null,
+        tags:
+          existingEntry?.tags ?? [],
+        audio_path: localAudioPath,
         raw_transcript:
-          captureMode === "voice" ? cleanRaw || null : null,
+          nextRawTranscript,
         cleaned_transcript:
-          captureMode === "voice" ? cleanCleaned || null : null,
-        created_at: data.log_created_at,
+          nextCleanedTranscript,
+        created_at: createdAt,
+        pending: true,
       };
 
-      setEntries((current) => [savedEntry, ...current]);
-      setActiveEntryId(savedEntry.id);
-      setActiveCreatedAt(savedEntry.created_at);
-      setHasUnsavedChanges(false);
-
       try {
-        const matchedHabit = await completeActivityHabit({
-          activity: "shadow",
+        await removeOfflineOperation(
+          `journal-delete:${entityId}`
+        );
+
+        if (
+          captureMode === "manual"
+        ) {
+          await cancelPendingAudioForEntity(
+            entityId
+          );
+        }
+
+        await enqueueOfflineOperation({
+          id: `journal:${entityId}`,
+          kind: "journal",
+          createdAt: mutationAt,
+          payload: {
+            entityId,
+            entryType: "shadow",
+            title: cleanPrompt,
+            content: storedContent,
+            mood:
+              existingEntry?.mood ?? null,
+            energy:
+              existingEntry?.energy ?? null,
+            tags:
+              existingEntry?.tags ?? [],
+            symbols: null,
+            createdAt,
+            audioPath:
+              serverAudioPath,
+            rawTranscript:
+              nextRawTranscript,
+            cleanedTranscript:
+              nextCleanedTranscript,
+            conflictGuard: Boolean(
+              existingEntry &&
+                !existingEntry.pending
+            ),
+            activity: "shadow",
+            date: getLocalDateKey(),
+          },
+        });
+
+        if (
+          hasNewAudio &&
+          pendingAudioCapture
+        ) {
+          await enqueueOfflineOperation({
+            id:
+              `audio-upload:${entityId}`,
+            kind: "audio-upload",
+            createdAt: mutationAt,
+            payload: {
+              entityId,
+              entryType: "shadow",
+              blobKey:
+                pendingAudioCapture.blobKey,
+              storagePath:
+                pendingAudioCapture.storagePath,
+              contentType:
+                pendingAudioCapture.contentType,
+            },
+          });
+        }
+
+        setEntries((current) => [
+          savedEntry,
+          ...current.filter(
+            (entry) =>
+              entry.id !== entityId
+          ),
+        ]);
+        setReflections((current) =>
+          current.filter(
+            (reflection) =>
+              reflection.journal_entry_id !==
+              entityId
+          )
+        );
+        setActiveEntryId(entityId);
+        setActiveCreatedAt(createdAt);
+        setHasUnsavedChanges(false);
+
+        dispatchDailyResetDataChanged({
+          scopes: [
+            "shadow",
+            "journal",
+            "analytics",
+          ],
+          source: "shadow",
           date: getLocalDateKey(),
         });
 
-        setMessage(
-          attachment.ok
-            ? `Shadow entry saved. ${matchedHabit.name} completed.`
-            : `Shadow entry saved and ${matchedHabit.name} completed, but media linking failed: ${attachment.error}`
+        const summary =
+          await syncOfflineQueue();
+        const stillPending =
+          (
+            await getOfflineOperations()
+          ).some(
+            (operation) =>
+              operation.id ===
+                `journal:${entityId}` ||
+              operation.id ===
+                `audio-upload:${entityId}`
+          );
+
+        setEntries((current) =>
+          current.map((entry) =>
+            entry.id === entityId
+              ? {
+                  ...entry,
+                  pending: stillPending,
+                }
+              : entry
+          )
         );
-      } catch (syncError) {
+
+        if (!stillPending) {
+          setPendingAudioCapture(null);
+        }
+
+        const conflict =
+          summary.conflicts[0];
+
         setMessage(
-          syncError instanceof Error
-            ? `Shadow entry saved, but habit sync failed: ${syncError.message}`
-            : "Shadow entry saved, but the shadow habit could not be completed."
+          conflict ??
+            (stillPending ||
+            summary.errors.length > 0
+              ? "Shadow entry saved on this device. It will retry automatically."
+              : captureMode === "voice"
+                ? "Shadow entry and recording synced. Transcription is ready."
+                : "Shadow entry saved and synced.")
+        );
+      } catch (error) {
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : "Shadow entry could not be stored on this device."
         );
       }
     });
@@ -413,8 +720,15 @@ export function ShadowConsolePanel({
   }
 
   async function transcribeEntry(
-    entry: Pick<ShadowEntry, "id" | "audio_path">
+    entry: Pick<ShadowEntry, "id" | "audio_path" | "pending">
   ) {
+    if (entry.pending || !navigator.onLine) {
+      setMessage(
+        "Sync the shadow entry before transcription."
+      );
+      return;
+    }
+
     if (!entry.audio_path) {
       setMessage("No audio is attached to this shadow entry.");
       return;
@@ -481,46 +795,37 @@ export function ShadowConsolePanel({
   }
 
   async function clearTranscript() {
-    if (!activeEntryId || captureMode !== "voice" || !audioPath) return;
-
-    setMessage(null);
-
-    try {
-      const updated = await updateShadow(activeEntryId, {
-        title: promptText.trim(),
-        content: composeShadowContent("", nextAction.trim()),
-        captureMode: "voice",
-        audioPath,
-        rawTranscript: "",
-        cleanedTranscript: "",
-      });
-
-      setEntries((current) =>
-        current.map((entry) =>
-          entry.id === updated.id ? updated : entry
-        )
-      );
-      setReflections((current) =>
-        current.filter(
-          (reflection) => reflection.journal_entry_id !== activeEntryId
-        )
-      );
-      setRawTranscript("");
-      setCleanedTranscript("");
-      setHasUnsavedChanges(false);
-      setMessage(
-        "Transcript deleted. The audio recording remains attached."
-      );
-    } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "Transcript deletion failed."
-      );
+    if (
+      !activeEntryId ||
+      captureMode !== "voice" ||
+      !audioPath
+    ) {
+      return;
     }
+
+    setRawTranscript("");
+    setCleanedTranscript("");
+    setHasUnsavedChanges(true);
+    setReflections((current) =>
+      current.filter(
+        (reflection) =>
+          reflection.journal_entry_id !==
+          activeEntryId
+      )
+    );
+    setMessage(
+      "Transcript cleared in the editor. Save changes to sync the deletion."
+    );
   }
 
   async function reflectShadow(entry: ShadowEntry) {
+    if (entry.pending || !navigator.onLine) {
+      setMessage(
+        "Sync the shadow entry before AI reflection."
+      );
+      return;
+    }
+
     setReflectingEntryId(entry.id);
     setMessage(null);
 
@@ -561,7 +866,9 @@ export function ShadowConsolePanel({
     if (entry) await reflectShadow(entry);
   }
 
-  async function deleteShadow(entry: ShadowEntry) {
+  async function deleteShadow(
+    entry: ShadowEntry
+  ) {
     const confirmed = window.confirm(
       "Delete this shadow entry and its transcript/reflection? This cannot be undone."
     );
@@ -572,32 +879,63 @@ export function ShadowConsolePanel({
     setMessage(null);
 
     try {
-      const response = await fetch(`/api/shadows/${entry.id}`, {
-        method: "DELETE",
+      await removeOfflineOperation(
+        `journal:${entry.id}`
+      );
+      await cancelPendingAudioForEntity(
+        entry.id
+      );
+      await enqueueOfflineOperation({
+        id:
+          `journal-delete:${entry.id}`,
+        kind: "journal-delete",
+        createdAt:
+          new Date().toISOString(),
+        payload: {
+          entityId: entry.id,
+        },
       });
-      const result = (await response.json()) as {
-        deletedId?: string;
-        error?: string;
-      };
-
-      if (!response.ok || !result.deletedId) {
-        throw new Error(result.error ?? "Shadow deletion failed.");
-      }
 
       setEntries((current) =>
-        current.filter((candidate) => candidate.id !== entry.id)
+        current.filter(
+          (candidate) =>
+            candidate.id !== entry.id
+        )
       );
       setReflections((current) =>
         current.filter(
-          (reflection) => reflection.journal_entry_id !== entry.id
+          (reflection) =>
+            reflection.journal_entry_id !==
+            entry.id
         )
       );
 
-      if (activeEntryId === entry.id) resetEditor();
-      setMessage("Shadow entry deleted.");
+      if (activeEntryId === entry.id) {
+        resetEditor();
+      }
+
+      const summary =
+        await syncOfflineQueue();
+      const stillPending =
+        (
+          await getOfflineOperations()
+        ).some(
+          (operation) =>
+            operation.id ===
+            `journal-delete:${entry.id}`
+        );
+
+      setMessage(
+        stillPending ||
+          summary.errors.length > 0
+          ? "Shadow deletion saved on this device. It will sync automatically."
+          : "Shadow entry and attached audio deleted."
+      );
     } catch (error) {
       setMessage(
-        error instanceof Error ? error.message : "Shadow deletion failed."
+        error instanceof Error
+          ? error.message
+          : "Shadow deletion failed."
       );
     } finally {
       setDeletingEntryId(null);
@@ -676,26 +1014,72 @@ export function ShadowConsolePanel({
             ) : (
               <div className="mt-2 border border-[#242424] bg-[#030303] p-3">
                 <ContextAudioRecorder
-                  onAudioUploaded={(path, previewUrl) => {
+                  onAudioUploaded={(
+                    path,
+                    previewUrl,
+                    captureState
+                  ) => {
+                    if (
+                      pendingAudioCapture &&
+                      pendingAudioCapture.blobKey !==
+                        captureState?.blobKey
+                    ) {
+                      void removeOfflineAudio(
+                        pendingAudioCapture.blobKey
+                      );
+                    }
+
                     setAudioPath(path);
-                    setAudioPreviewUrl(previewUrl);
+                    setAudioPreviewUrl(
+                      previewUrl
+                    );
+                    setPendingAudioCapture(
+                      toPendingAudioCapture(
+                        captureState
+                      )
+                    );
                     setRawTranscript("");
                     setCleanedTranscript("");
                     setHasUnsavedChanges(true);
                     setMessage(
-                      "Audio uploaded. Save the shadow entry before transcription."
+                      captureState?.pendingUpload
+                        ? "Audio saved on this device. Save the shadow entry to queue upload."
+                        : "Audio uploaded. Save the shadow entry before transcription."
                     );
                   }}
+                  contextLabel="shadow"
                   savedDreamId={
-                    hasUnsavedChanges ? null : activeEntryId
+                    hasUnsavedChanges ||
+                    activeEntry?.pending ||
+                    Boolean(
+                      pendingAudioCapture
+                    )
+                      ? null
+                      : activeEntryId
                   }
-                  savedAudioPath={hasUnsavedChanges ? null : audioPath}
+                  savedAudioPath={
+                    hasUnsavedChanges ||
+                    activeEntry?.pending ||
+                    Boolean(
+                      pendingAudioCapture
+                    )
+                      ? null
+                      : audioPath
+                  }
                   isTranscribing={
                     Boolean(activeEntryId) &&
                     transcribingEntryId === activeEntryId
                   }
                   onTranscribe={async () => {
-                    if (!activeEntryId || !audioPath || hasUnsavedChanges) {
+                    if (
+                      !activeEntryId ||
+                      !audioPath ||
+                      hasUnsavedChanges ||
+                      activeEntry?.pending ||
+                      Boolean(
+                        pendingAudioCapture
+                      )
+                    ) {
                       setMessage(
                         "Save the voice entry before transcribing it."
                       );
@@ -705,6 +1089,8 @@ export function ShadowConsolePanel({
                     await transcribeEntry({
                       id: activeEntryId,
                       audio_path: audioPath,
+                      pending:
+                        activeEntry?.pending,
                     });
                   }}
                 />
@@ -712,7 +1098,11 @@ export function ShadowConsolePanel({
                 {audioPath ? (
                   <div className="mt-3 border-t border-[#242424] pt-3">
                     <p className="terminal-green text-xs">
-                      &gt; recording attached
+                      &gt;{" "}
+                      {pendingAudioCapture ||
+                      activeEntry?.pending
+                        ? "recording stored on device"
+                        : "recording attached"}
                     </p>
                     <p className="terminal-muted mt-1 break-all text-[10px]">
                       {audioPath}
@@ -792,6 +1182,8 @@ export function ShadowConsolePanel({
               ? "reflecting..."
               : !activeEntryId
                 ? "save first, then reflect"
+                : activeEntry?.pending
+                  ? "waiting for sync"
                 : hasUnsavedChanges
                   ? "save changes before reflection"
                   : reflectionByEntry[activeEntryId]
@@ -968,6 +1360,28 @@ export function ShadowConsolePanel({
       </div>
     </div>
   );
+}
+
+function toPendingAudioCapture(
+  captureState:
+    | CapturedAudioState
+    | undefined
+): PendingAudioCapture | null {
+  if (
+    !captureState?.pendingUpload ||
+    !captureState.blobKey
+  ) {
+    return null;
+  }
+
+  return {
+    blobKey:
+      captureState.blobKey,
+    storagePath:
+      captureState.storagePath,
+    contentType:
+      captureState.contentType,
+  };
 }
 
 function ModeButton({
